@@ -46,6 +46,7 @@ class AudioSeparatorRunner:
             mdxc_params=self._mdxc_params(step),
             **self._common_options(step),
         )
+        self._log_acceleration_state()
         separator.load_model(model_filename=step["model_filename"])
 
         next_items: list[AudioItem] = []
@@ -144,3 +145,25 @@ class AudioSeparatorRunner:
 
         names = ", ".join(path.name for path in outputs)
         raise RuntimeError(f"Could not find target stem '{step['keep_stem']}' in outputs: {names}")
+
+    def _log_acceleration_state(self) -> None:
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                self.logger.info("Torch CUDA available: %s (%s)", torch.version.cuda, torch.cuda.get_device_name(0))
+            else:
+                self.logger.warning("Torch CUDA is not available; Torch models will use CPU.")
+        except Exception as exc:
+            self.logger.warning("Unable to inspect Torch CUDA state: %s", exc)
+
+        try:
+            import onnxruntime as ort
+
+            providers = ort.get_available_providers()
+            if "CUDAExecutionProvider" in providers:
+                self.logger.info("ONNX Runtime CUDAExecutionProvider available.")
+            else:
+                self.logger.warning("ONNX Runtime CUDAExecutionProvider is not available. Providers: %s", providers)
+        except Exception as exc:
+            self.logger.warning("Unable to inspect ONNX Runtime providers: %s", exc)

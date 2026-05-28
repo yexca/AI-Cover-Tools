@@ -6,6 +6,7 @@ env/
 models/
 outputs/
 outputs-*/
+archive/
 sample/
 
 *.log

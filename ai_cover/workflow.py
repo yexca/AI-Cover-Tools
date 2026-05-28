@@ -25,7 +25,8 @@ def run_pipeline(config: ModuleType, dry_run: bool = False) -> PipelineResult:
     root = Path(config.ROOT_DIR)
     inputs_dir = Path(config.INPUTS_DIR)
     work_dir = Path(config.WORK_OUTPUTS_DIR)
-    final_dir = root / f"{config.FINAL_OUTPUT_PREFIX}-{started_at.strftime(config.FINAL_OUTPUT_TIME_FORMAT)}"
+    archive_dir = Path(getattr(config, "ARCHIVE_DIR", root / "archive"))
+    final_dir = archive_dir / f"{config.FINAL_OUTPUT_PREFIX}-{started_at.strftime(config.FINAL_OUTPUT_TIME_FORMAT)}"
 
     _reset_work_dir(config, work_dir, dry_run)
     _setup_logging(config, work_dir, started_at)
@@ -46,6 +47,7 @@ def run_pipeline(config: ModuleType, dry_run: bool = False) -> PipelineResult:
 
     work_dir.mkdir(parents=True, exist_ok=True)
     final_dir.mkdir(parents=True, exist_ok=True)
+    log_path = _current_log_path()
 
     runner = AudioSeparatorRunner(config)
     manifest = {
@@ -98,6 +100,8 @@ def run_pipeline(config: ModuleType, dry_run: bool = False) -> PipelineResult:
 
     manifest["finished_at"] = datetime.now().isoformat(timespec="seconds")
     (final_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    if log_path and log_path.exists():
+        shutil.copy2(log_path, final_dir / log_path.name)
 
     if bool(getattr(config, "CLEAN_WORK_OUTPUTS_AFTER_SUCCESS", False)) and work_dir.exists():
         shutil.rmtree(work_dir)
@@ -194,3 +198,10 @@ def _setup_logging(config: ModuleType, work_dir: Path, started_at: datetime) -> 
     stream_handler.setFormatter(formatter)
     stream_handler.setLevel(level)
     root_logger.addHandler(stream_handler)
+
+
+def _current_log_path() -> Path | None:
+    for handler in logging.getLogger().handlers:
+        if isinstance(handler, logging.FileHandler):
+            return Path(handler.baseFilename)
+    return None

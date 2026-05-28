@@ -51,6 +51,21 @@ def _install_audio_separator(config: ModuleType) -> None:
 
     source_dir = Path(getattr(config, "AUDIO_SEPARATOR_SOURCE_DIR", "sample/python-audio-separator")).resolve()
     extra = str(getattr(config, "AUDIO_SEPARATOR_INSTALL_EXTRA", "gpu")).strip()
+    cuda_index_urls = list(
+        getattr(
+            config,
+            "PYTORCH_CUDA_INDEX_URLS",
+            [
+                "https://download.pytorch.org/whl/cu128",
+                "https://download.pytorch.org/whl/cu126",
+                "https://download.pytorch.org/whl/cu124",
+                "https://download.pytorch.org/whl/cu121",
+            ],
+        )
+    )
+
+    if extra.lower() == "gpu":
+        _install_cuda_torch(cuda_index_urls)
 
     if bool(getattr(config, "USE_LOCAL_AUDIO_SEPARATOR_SOURCE", True)) and source_dir.exists():
         primary = [sys.executable, "-m", "pip", "install", "-e", _editable_extra(extra)]
@@ -79,3 +94,28 @@ def _run_install_with_cpu_fallback(primary: list[str], fallback: list[str], cwd:
             raise
         print("GPU dependency installation failed. Falling back to CPU dependencies...")
         subprocess.run(fallback, cwd=cwd, check=True)
+
+
+def _install_cuda_torch(cuda_index_urls: list[str]) -> None:
+    for cuda_index_url in cuda_index_urls:
+        command = [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "--force-reinstall",
+            "torch",
+            "torchvision",
+            "torchaudio",
+            "--index-url",
+            cuda_index_url,
+        ]
+        try:
+            subprocess.run(command, check=True)
+            return
+        except subprocess.CalledProcessError:
+            continue
+
+    print("CUDA PyTorch installation failed for all configured CUDA wheel sources. Falling back to default PyTorch package...")
+    subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "torch", "torchvision", "torchaudio"], check=True)

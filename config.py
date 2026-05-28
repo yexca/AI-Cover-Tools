@@ -19,6 +19,7 @@ PREPROCESS_CHANNELS = None
 PREPROCESS_OVERWRITE = True
 
 # Final results are copied into ROOT_DIR / f"{FINAL_OUTPUT_PREFIX}-{timestamp}".
+ARCHIVE_DIR = ROOT_DIR / "archive"
 FINAL_OUTPUT_PREFIX = "outputs"
 FINAL_OUTPUT_TIME_FORMAT = "%Y%m%d-%H%M%S"
 FINAL_OUTPUT_GROUP_SUBDIRS = True
@@ -31,6 +32,12 @@ MODELS_DIR = ROOT_DIR / "models"
 USE_LOCAL_AUDIO_SEPARATOR_SOURCE = True
 AUDIO_SEPARATOR_SOURCE_DIR = ROOT_DIR / "sample" / "python-audio-separator"
 AUDIO_SEPARATOR_INSTALL_EXTRA = "gpu"  # gpu, cpu, or dml
+PYTORCH_CUDA_INDEX_URLS = [
+    "https://download.pytorch.org/whl/cu128",
+    "https://download.pytorch.org/whl/cu126",
+    "https://download.pytorch.org/whl/cu124",
+    "https://download.pytorch.org/whl/cu121",
+]
 AUTO_INSTALL_DEPENDENCIES = True
 VERIFY_RELATED_MODEL_FILES = True
 
@@ -111,30 +118,8 @@ MODEL_PIPELINE = [
         "stem_aliases": ["Vocals", "vocal"],
         "segment_size": 256,
         "override_model_segment_size": False,
-        "overlap": 8,
-        "batch_size": 1,
-        "pitch_shift": 0,
-    },
-    {
-        "label": "dechorus",
-        "model_filename": "mel_band_roformer_karaoke_gabox_v2.ckpt",
-        "keep_stem": "vocals",
-        "stem_aliases": ["Vocals", "Lead Vocals", "lead_vocals", "vocal"],
-        "segment_size": 256,
-        "override_model_segment_size": False,
-        "overlap": 8,
-        "batch_size": 1,
-        "pitch_shift": 0,
-    },
-    {
-        "label": "dereverb",
-        "model_filename": "dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt",
-        "keep_stem": "noreverb",
-        "stem_aliases": ["No Reverb", "NoReverb", "noreverb", "dry", "Dry"],
-        "segment_size": 256,
-        "override_model_segment_size": False,
-        "overlap": 8,
-        "batch_size": 1,
+        "overlap": 2,
+        "batch_size": 16,
         "pitch_shift": 0,
     },
 ]

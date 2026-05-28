@@ -12,14 +12,15 @@ inputs/
     your original files here
 models/
 outputs/
-outputs-YYYYmmdd-HHMMSS/
+archive/
+  outputs-YYYYmmdd-HHMMSS/
 env/
 ```
 
 - `inputs`: user-provided source folders. Files inside are ignored by git.
 - `outputs`: intermediate files, including converted first-step WAV files.
 - `models`: downloaded `audio-separator` models and related model data.
-- `outputs-YYYYmmdd-HHMMSS`: final WAV files from a completed run.
+- `archive/outputs-YYYYmmdd-HHMMSS`: final WAV files, manifest, and run log from a completed run.
 - `env`: local Python environment created by `run-install.bat`.
 
 ## Install
@@ -28,7 +29,7 @@ env/
 run-install.bat
 ```
 
-The installer creates `env`, installs Python 3.12 and FFmpeg, then installs GPU-enabled `audio-separator` dependencies first. If GPU dependency installation fails, it falls back to CPU dependencies. When `sample/python-audio-separator` exists, the installer uses that local source; otherwise it installs from PyPI.
+The installer creates `env`, installs Python 3.12 and FFmpeg, then installs CUDA-enabled PyTorch and GPU-enabled `audio-separator` dependencies first. If GPU dependency installation fails, it falls back to CPU dependencies. When `sample/python-audio-separator` exists, the installer uses that local source; otherwise it installs from PyPI.
 
 ## Run
 
@@ -54,7 +55,7 @@ run.bat --download-models-only
 4. Run each model in `MODEL_PIPELINE` in order.
 5. Put each model's raw output under `outputs/<group>-outputs<step>-<label>`.
 6. Copy the configured target stem into the next input folder as a clean WAV.
-7. Copy final WAV files into `outputs-YYYYmmdd-HHMMSS`.
+7. Copy final WAV files, `manifest.json`, and the run log into `archive/outputs-YYYYmmdd-HHMMSS`.
 
 ## Config Reference
 
@@ -65,6 +66,8 @@ Edit `config.py`.
 `INPUTS_DIR`: Where user source folders live. The program reads from here and does not write processed files here.
 
 `WORK_OUTPUTS_DIR`: Where all intermediate folders are created.
+
+`ARCHIVE_DIR`: Where completed final output folders are stored. The default is `archive`.
 
 `PREPROCESS_INPUTS`: Enables the first conversion/renaming stage. Keep this `True` for stable ASCII WAV inputs.
 
@@ -91,6 +94,8 @@ Edit `config.py`.
 `AUDIO_SEPARATOR_SOURCE_DIR`: Path to the optional local `python-audio-separator` source checkout.
 
 `AUDIO_SEPARATOR_INSTALL_EXTRA`: Dependency flavor. The default is `"gpu"` so compatible NVIDIA/CUDA systems are used first. Use `"cpu"` for CPU-only machines or `"dml"` for DirectML.
+
+`PYTORCH_CUDA_INDEX_URLS`: PyTorch wheel indexes tried by the installer for CUDA-enabled Torch. The defaults try newer CUDA wheels first, then fall back through older CUDA wheel sources.
 
 `AUTO_INSTALL_DEPENDENCIES`: If `True`, missing Python dependencies are installed automatically when possible.
 
@@ -139,4 +144,4 @@ Edit `config.py`.
 
 ## Git
 
-The repository keeps folder placeholders under `inputs`, but ignores real input audio. It also ignores generated or local-only folders such as `env`, `models`, `outputs`, `outputs-*`, and `sample`.
+The repository keeps folder placeholders under `inputs`, but ignores real input audio. It also ignores generated or local-only folders such as `env`, `models`, `outputs`, `archive`, and `sample`.
