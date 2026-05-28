@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
+import csv
 from pathlib import Path
 from types import ModuleType
 
@@ -18,14 +19,17 @@ def preprocess_group_inputs(config: ModuleType, group_name: str, items: list[Aud
 
     logger = logging.getLogger("ai_cover.preprocess")
     converted: list[AudioItem] = []
+    mapping_rows: list[dict[str, str]] = []
 
     for item in items:
         target = output_dir / f"{item.original_id}.wav"
+        action = "copy" if item.current_path.suffix.lower() == ".wav" and _can_copy_wav(config) else "convert"
         if target.exists() and not bool(getattr(config, "PREPROCESS_OVERWRITE", True)):
             converted.append(AudioItem(original_id=item.original_id, current_path=target))
+            mapping_rows.append(_mapping_row(item, target, "reuse"))
             continue
 
-        if item.current_path.suffix.lower() == ".wav" and _can_copy_wav(config):
+        if action == "copy":
             shutil.copy2(item.current_path, target)
             logger.info("Copied WAV input: %s -> %s", item.current_path, target)
         else:
@@ -33,8 +37,30 @@ def preprocess_group_inputs(config: ModuleType, group_name: str, items: list[Aud
             logger.info("Converted input to WAV: %s -> %s", item.current_path, target)
 
         converted.append(AudioItem(original_id=item.original_id, current_path=target))
+        mapping_rows.append(_mapping_row(item, target, action))
 
+    _write_mapping_csv(Path(config.WORK_OUTPUTS_DIR) / f"{group_name}-rename-map.csv", mapping_rows)
     return converted
+
+
+def _mapping_row(item: AudioItem, target: Path, action: str) -> dict[str, str]:
+    return {
+        "id": item.original_id,
+        "action": action,
+        "source_path": str(item.current_path),
+        "source_name": item.current_path.name,
+        "target_path": str(target),
+        "target_name": target.name,
+    }
+
+
+def _write_mapping_csv(path: Path, rows: list[dict[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = ["id", "action", "source_path", "source_name", "target_path", "target_name"]
+    with path.open("w", newline="", encoding="utf-8-sig") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def _can_copy_wav(config: ModuleType) -> bool:

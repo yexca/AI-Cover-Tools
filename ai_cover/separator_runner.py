@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
-from .naming import normalize_token, output_extension, parsed_stem_from_separator_name, safe_name, stem_aliases
+from .naming import normalize_token, parsed_stem_from_separator_name, safe_name, stem_aliases
 
 
 @dataclass(frozen=True)
@@ -63,7 +63,7 @@ class AudioSeparatorRunner:
 
             target = self._select_target_file(outputs, step, clean_base)
             clean_target = next_input_dir / f"{clean_base}.wav"
-            shutil.copy2(target, clean_target)
+            shutil.move(str(target), str(clean_target))
             kept_files.append(clean_target)
             next_items.append(AudioItem(original_id=item.original_id, current_path=clean_target))
 

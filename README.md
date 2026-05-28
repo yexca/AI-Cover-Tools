@@ -12,7 +12,7 @@ inputs/
     your original files here
 models/
 outputs/
-archive/
+archives/
   outputs-YYYYmmdd-HHMMSS/
 env/
 ```
@@ -20,7 +20,7 @@ env/
 - `inputs`: user-provided source folders. Files inside are ignored by git.
 - `outputs`: intermediate files, including converted first-step WAV files.
 - `models`: downloaded `audio-separator` models and related model data.
-- `archive/outputs-YYYYmmdd-HHMMSS`: final WAV files, manifest, and run log from a completed run.
+- `archives/outputs-YYYYmmdd-HHMMSS`: every intermediate folder, final outputs, manifest, rename maps, and run log from a completed run.
 - `env`: local Python environment created by `run-install.bat`.
 
 ## Install
@@ -55,7 +55,8 @@ run.bat --download-models-only
 4. Run each model in `MODEL_PIPELINE` in order.
 5. Put each model's raw output under `outputs/<group>-outputs<step>-<label>`.
 6. Copy the configured target stem into the next input folder as a clean WAV.
-7. Copy final WAV files, `manifest.json`, and the run log into `archive/outputs-YYYYmmdd-HHMMSS`.
+7. Move final WAV files into `outputs/<group>-end`.
+8. Move the whole `outputs` folder into `archives/outputs-YYYYmmdd-HHMMSS`.
 
 ## Config Reference
 
@@ -67,7 +68,7 @@ Edit `config.py`.
 
 `WORK_OUTPUTS_DIR`: Where all intermediate folders are created.
 
-`ARCHIVE_DIR`: Where completed final output folders are stored. The default is `archive`.
+`ARCHIVE_DIR`: Where completed run folders are stored. The default is `archives`.
 
 `PREPROCESS_INPUTS`: Enables the first conversion/renaming stage. Keep this `True` for stable ASCII WAV inputs.
 
@@ -144,4 +145,4 @@ Edit `config.py`.
 
 ## Git
 
-The repository keeps folder placeholders under `inputs`, but ignores real input audio. It also ignores generated or local-only folders such as `env`, `models`, `outputs`, `archive`, and `sample`.
+The repository keeps folder placeholders under `inputs`, but ignores real input audio. It also ignores generated or local-only folders such as `env`, `models`, `outputs`, `archive`, `archives`, and `sample`.

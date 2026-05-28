@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -25,8 +26,8 @@ def run_pipeline(config: ModuleType, dry_run: bool = False) -> PipelineResult:
     root = Path(config.ROOT_DIR)
     inputs_dir = Path(config.INPUTS_DIR)
     work_dir = Path(config.WORK_OUTPUTS_DIR)
-    archive_dir = Path(getattr(config, "ARCHIVE_DIR", root / "archive"))
-    final_dir = archive_dir / f"{config.FINAL_OUTPUT_PREFIX}-{started_at.strftime(config.FINAL_OUTPUT_TIME_FORMAT)}"
+    archive_dir = Path(getattr(config, "ARCHIVE_DIR", root / "archives"))
+    archive_run_dir = archive_dir / f"{config.FINAL_OUTPUT_PREFIX}-{started_at.strftime(config.FINAL_OUTPUT_TIME_FORMAT)}"
 
     _reset_work_dir(config, work_dir, dry_run)
     _setup_logging(config, work_dir, started_at)
@@ -34,7 +35,7 @@ def run_pipeline(config: ModuleType, dry_run: bool = False) -> PipelineResult:
 
     groups = _prepare_groups(config, inputs_dir, dry_run)
     if not groups:
-        return PipelineResult(final_output_dir=final_dir, groups_processed=0, files_processed=0)
+        return PipelineResult(final_output_dir=archive_run_dir, groups_processed=0, files_processed=0)
 
     if dry_run:
         print(f"Input groups: {len(groups)}")
@@ -43,16 +44,15 @@ def run_pipeline(config: ModuleType, dry_run: bool = False) -> PipelineResult:
         print("Model steps:")
         for index, step in enumerate(config.MODEL_PIPELINE, start=1):
             print(f"- {index}. {step['label']}: {step['model_filename']} -> {step['keep_stem']}")
-        return PipelineResult(final_output_dir=final_dir, groups_processed=len(groups), files_processed=sum(len(v) for v in groups.values()))
+        return PipelineResult(final_output_dir=archive_run_dir, groups_processed=len(groups), files_processed=sum(len(v) for v in groups.values()))
 
     work_dir.mkdir(parents=True, exist_ok=True)
-    final_dir.mkdir(parents=True, exist_ok=True)
     log_path = _current_log_path()
 
     runner = AudioSeparatorRunner(config)
     manifest = {
         "started_at": started_at.isoformat(timespec="seconds"),
-        "final_output_dir": str(final_dir),
+        "archive_run_dir": str(archive_run_dir),
         "groups": {},
     }
 
@@ -87,11 +87,11 @@ def run_pipeline(config: ModuleType, dry_run: bool = False) -> PipelineResult:
             )
             current_items = result.next_items
 
-        final_group_dir = final_dir / group_name if bool(getattr(config, "FINAL_OUTPUT_GROUP_SUBDIRS", True)) else final_dir
+        final_group_dir = work_dir / f"{group_name}-end" if bool(getattr(config, "FINAL_OUTPUT_GROUP_SUBDIRS", True)) else work_dir / "end"
         final_group_dir.mkdir(parents=True, exist_ok=True)
         for item in current_items:
             destination = final_group_dir / item.current_path.name
-            shutil.copy2(item.current_path, destination)
+            shutil.move(str(item.current_path), str(destination))
             group_manifest["final_files"].append(str(destination))
             total_files += 1
 
@@ -99,14 +99,12 @@ def run_pipeline(config: ModuleType, dry_run: bool = False) -> PipelineResult:
         logger.info("Finished group: %s", group_name)
 
     manifest["finished_at"] = datetime.now().isoformat(timespec="seconds")
-    (final_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    (work_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     if log_path and log_path.exists():
-        shutil.copy2(log_path, final_dir / log_path.name)
+        logging.shutdown()
+    archived_dir = _archive_work_outputs(work_dir, archive_run_dir)
 
-    if bool(getattr(config, "CLEAN_WORK_OUTPUTS_AFTER_SUCCESS", False)) and work_dir.exists():
-        shutil.rmtree(work_dir)
-
-    return PipelineResult(final_output_dir=final_dir, groups_processed=len(groups), files_processed=total_files)
+    return PipelineResult(final_output_dir=archived_dir, groups_processed=len(groups), files_processed=total_files)
 
 
 def preprocess_only(config: ModuleType, dry_run: bool = False) -> PipelineResult:
@@ -137,6 +135,22 @@ def _reset_work_dir(config: ModuleType, work_dir: Path, dry_run: bool) -> None:
         return
     if bool(getattr(config, "CLEAN_WORK_OUTPUTS_BEFORE_RUN", True)) and work_dir.exists():
         shutil.rmtree(work_dir)
+
+
+def _archive_work_outputs(work_dir: Path, archive_run_dir: Path) -> Path:
+    archive_run_dir.parent.mkdir(parents=True, exist_ok=True)
+    target = _unique_archive_path(archive_run_dir)
+    if work_dir.exists():
+        shutil.move(str(work_dir), str(target))
+    else:
+        target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def _unique_archive_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    return path.with_name(f"{path.name}-{uuid.uuid4().hex[:8]}")
 
 
 def _prepare_groups(config: ModuleType, inputs_dir: Path, dry_run: bool) -> dict[str, list[AudioItem]]:

@@ -18,8 +18,8 @@ PREPROCESS_SAMPLE_RATE = None
 PREPROCESS_CHANNELS = None
 PREPROCESS_OVERWRITE = True
 
-# Final results are copied into ROOT_DIR / f"{FINAL_OUTPUT_PREFIX}-{timestamp}".
-ARCHIVE_DIR = ROOT_DIR / "archive"
+# Completed runs are moved into ROOT_DIR / "archives" / f"{FINAL_OUTPUT_PREFIX}-{timestamp}".
+ARCHIVE_DIR = ROOT_DIR / "archives"
 FINAL_OUTPUT_PREFIX = "outputs"
 FINAL_OUTPUT_TIME_FORMAT = "%Y%m%d-%H%M%S"
 FINAL_OUTPUT_GROUP_SUBDIRS = True
