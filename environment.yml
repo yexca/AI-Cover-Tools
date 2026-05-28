@@ -1,0 +1,9 @@
+name: ai-cover
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - ffmpeg
+  - pip:
+      - -e ./sample/python-audio-separator[cpu]

@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+env/
+models/
+outputs/
+outputs-*/
+sample/
+
+*.log
+
+inputs/*
+!inputs/.gitkeep
+!inputs/*/
+inputs/*/*
+!inputs/*/.gitkeep
