@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
-import csv
 from pathlib import Path
 from types import ModuleType
 
@@ -39,7 +38,7 @@ def preprocess_group_inputs(config: ModuleType, group_name: str, items: list[Aud
         converted.append(AudioItem(original_id=item.original_id, current_path=target))
         mapping_rows.append(_mapping_row(item, target, action))
 
-    _write_mapping_csv(Path(config.WORK_OUTPUTS_DIR) / f"{group_name}-rename-map.csv", mapping_rows)
+    _write_mapping_markdown(Path(config.WORK_OUTPUTS_DIR) / f"{group_name}-rename-map.md", mapping_rows)
     return converted
 
 
@@ -54,13 +53,23 @@ def _mapping_row(item: AudioItem, target: Path, action: str) -> dict[str, str]:
     }
 
 
-def _write_mapping_csv(path: Path, rows: list[dict[str, str]]) -> None:
+def _write_mapping_markdown(path: Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = ["id", "action", "source_path", "source_name", "target_path", "target_name"]
-    with path.open("w", newline="", encoding="utf-8-sig") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+    headers = ["id", "action", "source_name", "target_name", "source_path", "target_path"]
+    lines = [
+        "# Rename Map",
+        "",
+        "| ID | Action | Source Name | Target Name | Source Path | Target Path |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in rows:
+        lines.append("| " + " | ".join(_markdown_cell(row[key]) for key in headers) + " |")
+    lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _markdown_cell(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("|", "\\|").replace("\n", "<br>")
 
 
 def _can_copy_wav(config: ModuleType) -> bool:
