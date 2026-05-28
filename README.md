@@ -28,7 +28,7 @@ env/
 run-install.bat
 ```
 
-The installer creates `env`, installs Python 3.12 and FFmpeg, then installs the local `sample/python-audio-separator` package when it exists. If `sample` is not present, it installs `audio-separator` from PyPI.
+The installer creates `env`, installs Python 3.12 and FFmpeg, then installs GPU-enabled `audio-separator` dependencies first. If GPU dependency installation fails, it falls back to CPU dependencies. When `sample/python-audio-separator` exists, the installer uses that local source; otherwise it installs from PyPI.
 
 ## Run
 
@@ -90,7 +90,7 @@ Edit `config.py`.
 
 `AUDIO_SEPARATOR_SOURCE_DIR`: Path to the optional local `python-audio-separator` source checkout.
 
-`AUDIO_SEPARATOR_INSTALL_EXTRA`: Dependency flavor. Use `"cpu"`, `"gpu"`, or `"dml"`.
+`AUDIO_SEPARATOR_INSTALL_EXTRA`: Dependency flavor. The default is `"gpu"` so compatible NVIDIA/CUDA systems are used first. Use `"cpu"` for CPU-only machines or `"dml"` for DirectML.
 
 `AUTO_INSTALL_DEPENDENCIES`: If `True`, missing Python dependencies are installed automatically when possible.
 
@@ -102,7 +102,7 @@ Edit `config.py`.
 
 `STOP_ON_ERROR`: If `True`, the whole run stops when one group or model step fails.
 
-`CLEAN_WORK_OUTPUTS_BEFORE_RUN`: If `True`, deletes `outputs` before a full run.
+`CLEAN_WORK_OUTPUTS_BEFORE_RUN`: If `True`, deletes `outputs` before each run so old intermediate files cannot conflict with the new run.
 
 `CLEAN_WORK_OUTPUTS_AFTER_SUCCESS`: If `True`, deletes intermediate `outputs` after a successful full run.
 

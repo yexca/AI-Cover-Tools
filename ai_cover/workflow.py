@@ -27,6 +27,7 @@ def run_pipeline(config: ModuleType, dry_run: bool = False) -> PipelineResult:
     work_dir = Path(config.WORK_OUTPUTS_DIR)
     final_dir = root / f"{config.FINAL_OUTPUT_PREFIX}-{started_at.strftime(config.FINAL_OUTPUT_TIME_FORMAT)}"
 
+    _reset_work_dir(config, work_dir, dry_run)
     _setup_logging(config, work_dir, started_at)
     logger = logging.getLogger("ai_cover.workflow")
 
@@ -43,8 +44,6 @@ def run_pipeline(config: ModuleType, dry_run: bool = False) -> PipelineResult:
             print(f"- {index}. {step['label']}: {step['model_filename']} -> {step['keep_stem']}")
         return PipelineResult(final_output_dir=final_dir, groups_processed=len(groups), files_processed=sum(len(v) for v in groups.values()))
 
-    if bool(getattr(config, "CLEAN_WORK_OUTPUTS_BEFORE_RUN", False)) and work_dir.exists():
-        shutil.rmtree(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     final_dir.mkdir(parents=True, exist_ok=True)
 
@@ -111,6 +110,7 @@ def preprocess_only(config: ModuleType, dry_run: bool = False) -> PipelineResult
     inputs_dir = Path(config.INPUTS_DIR)
     work_dir = Path(config.WORK_OUTPUTS_DIR)
 
+    _reset_work_dir(config, work_dir, dry_run)
     _setup_logging(config, work_dir, started_at)
     groups = _prepare_groups(config, inputs_dir, dry_run)
     if not groups:
@@ -126,6 +126,13 @@ def preprocess_only(config: ModuleType, dry_run: bool = False) -> PipelineResult
         total_files += len(converted)
 
     return PipelineResult(final_output_dir=work_dir, groups_processed=len(groups), files_processed=total_files)
+
+
+def _reset_work_dir(config: ModuleType, work_dir: Path, dry_run: bool) -> None:
+    if dry_run:
+        return
+    if bool(getattr(config, "CLEAN_WORK_OUTPUTS_BEFORE_RUN", True)) and work_dir.exists():
+        shutil.rmtree(work_dir)
 
 
 def _prepare_groups(config: ModuleType, inputs_dir: Path, dry_run: bool) -> dict[str, list[AudioItem]]:

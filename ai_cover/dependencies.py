@@ -50,15 +50,32 @@ def _install_audio_separator(config: ModuleType) -> None:
         )
 
     source_dir = Path(getattr(config, "AUDIO_SEPARATOR_SOURCE_DIR", "sample/python-audio-separator")).resolve()
-    extra = str(getattr(config, "AUDIO_SEPARATOR_INSTALL_EXTRA", "cpu")).strip()
-    extra_suffix = f"[{extra}]" if extra else ""
+    extra = str(getattr(config, "AUDIO_SEPARATOR_INSTALL_EXTRA", "gpu")).strip()
 
     if bool(getattr(config, "USE_LOCAL_AUDIO_SEPARATOR_SOURCE", True)) and source_dir.exists():
-        cmd = [sys.executable, "-m", "pip", "install", "-e", f".{extra_suffix}"]
-        cwd = source_dir
+        primary = [sys.executable, "-m", "pip", "install", "-e", _editable_extra(extra)]
+        fallback = [sys.executable, "-m", "pip", "install", "-e", ".[cpu]"]
+        _run_install_with_cpu_fallback(primary, fallback, source_dir, extra)
     else:
-        cmd = [sys.executable, "-m", "pip", "install", f"audio-separator{extra_suffix}"]
-        cwd = None
+        primary = [sys.executable, "-m", "pip", "install", _package_extra(extra)]
+        fallback = [sys.executable, "-m", "pip", "install", "audio-separator[cpu]"]
+        _run_install_with_cpu_fallback(primary, fallback, None, extra)
 
+
+def _editable_extra(extra: str) -> str:
+    return f".[{extra}]" if extra else "."
+
+
+def _package_extra(extra: str) -> str:
+    return f"audio-separator[{extra}]" if extra else "audio-separator"
+
+
+def _run_install_with_cpu_fallback(primary: list[str], fallback: list[str], cwd: Path | None, extra: str) -> None:
     print("Installing audio-separator dependencies. This may take a while...")
-    subprocess.run(cmd, cwd=cwd, check=True)
+    try:
+        subprocess.run(primary, cwd=cwd, check=True)
+    except subprocess.CalledProcessError:
+        if extra.lower() == "cpu":
+            raise
+        print("GPU dependency installation failed. Falling back to CPU dependencies...")
+        subprocess.run(fallback, cwd=cwd, check=True)

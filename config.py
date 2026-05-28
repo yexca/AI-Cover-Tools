@@ -30,7 +30,7 @@ MODELS_DIR = ROOT_DIR / "models"
 # the installer falls back to installing audio-separator from PyPI.
 USE_LOCAL_AUDIO_SEPARATOR_SOURCE = True
 AUDIO_SEPARATOR_SOURCE_DIR = ROOT_DIR / "sample" / "python-audio-separator"
-AUDIO_SEPARATOR_INSTALL_EXTRA = "cpu"  # cpu, gpu, or dml
+AUDIO_SEPARATOR_INSTALL_EXTRA = "gpu"  # gpu, cpu, or dml
 AUTO_INSTALL_DEPENDENCIES = True
 VERIFY_RELATED_MODEL_FILES = True
 
@@ -48,7 +48,7 @@ AUDIO_EXTENSIONS = {
 
 RECURSIVE_INPUT_SCAN = True
 STOP_ON_ERROR = True
-CLEAN_WORK_OUTPUTS_BEFORE_RUN = False
+CLEAN_WORK_OUTPUTS_BEFORE_RUN = True
 CLEAN_WORK_OUTPUTS_AFTER_SUCCESS = False
 
 LOG_LEVEL = "INFO"

@@ -1,1 +1,1 @@
-audio-separator[cpu]
+audio-separator[gpu]

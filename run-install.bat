@@ -30,12 +30,20 @@ python -m pip install --upgrade pip
 if errorlevel 1 goto :error
 if exist "%INSTALL_DIR%\sample\python-audio-separator\pyproject.toml" (
     pushd "%INSTALL_DIR%\sample\python-audio-separator"
-    python -m pip install -e ".[cpu]"
+    python -m pip install -e ".[gpu]"
+    if errorlevel 1 (
+        echo GPU dependency installation failed. Falling back to CPU dependencies...
+        python -m pip install -e ".[cpu]"
+    )
     popd
     if errorlevel 1 goto :error
 ) else (
     python -m pip install -r "%INSTALL_DIR%\requirements.txt"
-    if errorlevel 1 goto :error
+    if errorlevel 1 (
+        echo GPU dependency installation failed. Falling back to CPU dependencies...
+        python -m pip install "audio-separator[cpu]"
+        if errorlevel 1 goto :error
+    )
 )
 call "%MINICONDA_DIR%\condabin\conda.bat" deactivate
 
