@@ -6,13 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
-from .naming import normalize_token, parsed_stem_from_separator_name, safe_name, stem_aliases
-
-
-@dataclass(frozen=True)
-class AudioItem:
-    original_id: str
-    current_path: Path
+from ..utils.audio import AudioItem
+from ..utils.naming import normalize_token, parsed_stem_from_separator_name, safe_name, stem_aliases
 
 
 @dataclass(frozen=True)

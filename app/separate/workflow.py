@@ -9,9 +9,10 @@ from datetime import datetime
 from pathlib import Path
 from types import ModuleType
 
-from .naming import numbered_audio_id, safe_name
+from ..utils.audio import AudioItem
+from ..utils.naming import numbered_audio_id, safe_name
 from .preprocess import preprocess_group_inputs
-from .separator_runner import AudioItem, AudioSeparatorRunner
+from .runner import AudioSeparatorRunner
 
 
 @dataclass(frozen=True)

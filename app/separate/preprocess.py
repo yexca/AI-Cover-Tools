@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 from types import ModuleType
 
-from .separator_runner import AudioItem
+from ..utils.audio import AudioItem
 
 
 def preprocess_group_inputs(config: ModuleType, group_name: str, items: list[AudioItem]) -> list[AudioItem]:

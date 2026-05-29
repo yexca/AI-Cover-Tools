@@ -2,15 +2,23 @@
 
 AI-Cover is a local batch pipeline for preparing AI cover training data. It reads audio from `inputs`, converts every source file into clean numbered WAV files, then runs the configured `audio-separator` model chain. User input files are never modified.
 
+The target architecture follows the AI cover workflow:
+
+```text
+separate -> slicer -> train -> inference
+```
+
+The current executable modules are `separate` and `slicer`, implemented under `app/separate` and `app/slicer`. Training and inference code has dedicated packages under `app/train` and `app/inference`.
+
 ## Install
 
 ```bat
 run-install.bat
 ```
 
-The installer creates `env`, installs Python 3.12 and FFmpeg, then installs CUDA-enabled PyTorch and GPU-enabled `audio-separator` dependencies first. If GPU dependency installation fails, it falls back to CPU dependencies.
+The installer only manages the project-local `env`. If `env` is missing, it downloads Miniconda into `env/conda` and creates the environment. Existing dependencies inside `env` are skipped when they are already usable.
 
-## Run
+## Run CLI
 
 Put audio files into subfolders under `inputs`, for example:
 
@@ -35,6 +43,14 @@ run.bat --dry-run
 run.bat --preprocess-only
 run.bat --download-models-only
 ```
+
+## Run GUI
+
+```bat
+run-gui.bat
+```
+
+The GUI includes the Slicer page. It defaults to `inputs` as the input folder, `outputs` as the output folder, and `wav` as the output format.
 
 ## Output
 
@@ -81,4 +97,4 @@ MODEL_PIPELINE = [
 - `stem_aliases`: alternate names that may appear in model output.
 - `segment_size`, `overlap`, `batch_size`, `pitch_shift`: inference parameters.
 
-Full configuration and development notes are in [documents/development.md](documents/development.md).
+Full configuration, architecture notes, and GUI notes are in [documents/README.md](documents/README.md).

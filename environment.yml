@@ -7,3 +7,6 @@ dependencies:
   - ffmpeg
   - pip:
       - -e ./sample/python-audio-separator[cpu]
+      - PySide6==6.8.1
+      - numpy
+      - soundfile==0.13.1

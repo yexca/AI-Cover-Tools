@@ -4,11 +4,11 @@ import argparse
 import sys
 from pathlib import Path
 
-from ai_cover.config_loader import load_config
-from ai_cover.dependencies import ensure_audio_separator_available
-from ai_cover.models import ensure_models
-from ai_cover.workflow import preprocess_only
-from ai_cover.workflow import run_pipeline
+from app.separate.dependencies import ensure_audio_separator_available
+from app.separate.models import ensure_models
+from app.separate.workflow import preprocess_only
+from app.separate.workflow import run_pipeline
+from app.utils.config_loader import load_config
 
 
 def parse_args() -> argparse.Namespace:

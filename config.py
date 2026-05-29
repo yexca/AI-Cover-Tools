@@ -1,112 +1,7 @@
-from pathlib import Path
-
-
-ROOT_DIR = Path(__file__).resolve().parent
-
-# User input lives here. The pipeline treats this directory as read-only.
-INPUTS_DIR = ROOT_DIR / "inputs"
-
-# Intermediate step outputs and next-step inputs live here.
-WORK_OUTPUTS_DIR = ROOT_DIR / "outputs"
-
-# Every input file is first copied or converted into WAV here:
-# WORK_OUTPUTS_DIR / f"{group_name}-inputs1".
-PREPROCESS_INPUTS = True
-PREPROCESS_OUTPUT_FORMAT = "wav"
-PREPROCESS_WAV_CODEC = "pcm_s24le"
-PREPROCESS_SAMPLE_RATE = None
-PREPROCESS_CHANNELS = None
-PREPROCESS_OVERWRITE = True
-
-# Completed runs are moved into ROOT_DIR / "archives" / f"{FINAL_OUTPUT_PREFIX}-{timestamp}".
-ARCHIVE_DIR = ROOT_DIR / "archives"
-FINAL_OUTPUT_PREFIX = "outputs"
-FINAL_OUTPUT_TIME_FORMAT = "%Y%m%d-%H%M%S"
-FINAL_OUTPUT_GROUP_SUBDIRS = True
-
-# Model cache used by audio-separator.
-MODELS_DIR = ROOT_DIR / "models"
-
-# Prefer the sample checkout you placed in this project. If it is missing,
-# the installer falls back to installing audio-separator from PyPI.
-USE_LOCAL_AUDIO_SEPARATOR_SOURCE = True
-AUDIO_SEPARATOR_SOURCE_DIR = ROOT_DIR / "sample" / "python-audio-separator"
-AUDIO_SEPARATOR_INSTALL_EXTRA = "gpu"  # gpu, cpu, or dml
-PYTORCH_CUDA_INDEX_URLS = [
-    "https://download.pytorch.org/whl/cu128",
-    "https://download.pytorch.org/whl/cu126",
-    "https://download.pytorch.org/whl/cu124",
-    "https://download.pytorch.org/whl/cu121",
-]
-AUTO_INSTALL_DEPENDENCIES = True
-VERIFY_RELATED_MODEL_FILES = True
-
-AUDIO_EXTENSIONS = {
-    ".wav",
-    ".flac",
-    ".mp3",
-    ".ogg",
-    ".opus",
-    ".m4a",
-    ".aiff",
-    ".aif",
-    ".ac3",
-}
-
-RECURSIVE_INPUT_SCAN = True
-STOP_ON_ERROR = True
-CLEAN_WORK_OUTPUTS_BEFORE_RUN = True
-CLEAN_WORK_OUTPUTS_AFTER_SUCCESS = False
-
-LOG_LEVEL = "INFO"
-
-COMMON_SEPARATOR_OPTIONS = {
-    "output_format": "WAV",
-    "output_bitrate": None,
-    "normalization_threshold": 0.9,
-    "amplification_threshold": 0.0,
-    "invert_using_spec": False,
-    "sample_rate": 44100,
-    "use_soundfile": False,
-    "use_autocast": False,
-    "chunk_duration": None,
-    # Leave False unless you are certain the configured stem name matches the
-    # model exactly. False is slower but safer for unknown models.
-    "output_single_stem": False,
-}
-
-DEFAULT_MDX_PARAMS = {
-    "hop_length": 1024,
-    "segment_size": 256,
-    "overlap": 0.25,
-    "batch_size": 1,
-    "enable_denoise": False,
-}
-
-DEFAULT_VR_PARAMS = {
-    "batch_size": 1,
-    "window_size": 512,
-    "aggression": 5,
-    "enable_tta": False,
-    "enable_post_process": False,
-    "post_process_threshold": 0.2,
-    "high_end_process": False,
-}
-
-DEFAULT_DEMUCS_PARAMS = {
-    "segment_size": "Default",
-    "shifts": 2,
-    "overlap": 0.25,
-    "segments_enabled": True,
-}
-
-DEFAULT_MDXC_PARAMS = {
-    "segment_size": 256,
-    "override_model_segment_size": False,
-    "batch_size": 1,
-    "overlap": 8,
-    "pitch_shift": 0,
-}
+MODEL_BATCH_SIZE = 16
+MODEL_OVERLAP = 2
+MODEL_SEGMENT_SIZE = 256
+MODEL_OVERRIDE_SEGMENT_SIZE = False
 
 # Edit this list to change the order of processing. keep_stem is the target
 # product to pass to the next model and to keep in the final output.
@@ -116,10 +11,6 @@ MODEL_PIPELINE = [
         "model_filename": "mel_band_roformer_kim_ft3_unwa.ckpt",
         "keep_stem": "vocals",
         "stem_aliases": ["Vocals", "vocal"],
-        "segment_size": 256,
-        "override_model_segment_size": False,
-        "overlap": 2,
-        "batch_size": 16,
         "pitch_shift": 0,
     },
 ]
