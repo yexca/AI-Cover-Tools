@@ -6,6 +6,7 @@ from PySide6.QtCore import QObject, QThread, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, QPixmap, QResizeEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QDialog,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -28,12 +29,13 @@ from ..paths import PROJECT_ROOT
 
 
 class DropArea(QFrame):
-    file_dropped = Signal(str)
+    path_dropped = Signal(str)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, accept_folder: bool = False, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("DropArea")
         self.setAcceptDrops(True)
+        self._accept_folder = accept_folder
         self._label = QLabel()
         self._label.setObjectName("MutedText")
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -46,26 +48,46 @@ class DropArea(QFrame):
         self._label.setText(text)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if self._first_local_file(event.mimeData().urls()) is not None:
+        if self._first_supported_path(event.mimeData().urls()) is not None:
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def dropEvent(self, event: QDropEvent) -> None:
-        path = self._first_local_file(event.mimeData().urls())
+        path = self._first_supported_path(event.mimeData().urls())
         if path is None:
             event.ignore()
             return
-        self.file_dropped.emit(str(path))
+        self.path_dropped.emit(str(path))
         event.acceptProposedAction()
 
-    def _first_local_file(self, urls: list[QUrl]) -> Path | None:
+    def _first_supported_path(self, urls: list[QUrl]) -> Path | None:
         for url in urls:
             if url.isLocalFile():
                 path = Path(url.toLocalFile())
-                if path.is_file():
+                if self._accept_folder and path.is_dir():
+                    return path
+                if not self._accept_folder and path.is_file():
                     return path
         return None
+
+
+class PreviewImageLabel(QLabel):
+    preview_requested = Signal(object)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._image_path: Path | None = None
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def set_image_path(self, image_path: Path | None) -> None:
+        self._image_path = image_path
+
+    def mousePressEvent(self, event) -> None:  # noqa: ANN001
+        if event.button() == Qt.MouseButton.LeftButton and self._image_path is not None:
+            self.preview_requested.emit(self._image_path)
+            return
+        super().mousePressEvent(event)
 
 
 class ToolWorker(QObject):
@@ -107,6 +129,7 @@ class ToolsPage(QWidget):
         self._current_mode = "quality"
         self._quality_result: AudioQualityResult | None = None
         self._quality_segment_index = 0
+        self._pitch_plot_path: Path | None = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -188,6 +211,7 @@ class ToolsPage(QWidget):
         self._duration_folder_label.setText(translator.text("tools.folder"))
         self._duration_choose.setText(translator.text("settings.choose"))
         self._duration_run.setText(translator.text("tools.calculate"))
+        self._duration_drop_area.set_text(translator.text("tools.drop_folder"))
         self._duration_output_card.setVisible(bool(self._duration_text.text()))
 
         self._pitch_input_title.setText(translator.text("tools.input"))
@@ -195,6 +219,7 @@ class ToolsPage(QWidget):
         self._pitch_folder_label.setText(translator.text("tools.folder"))
         self._pitch_choose.setText(translator.text("settings.choose"))
         self._pitch_run.setText(translator.text("tools.analyze"))
+        self._pitch_drop_area.set_text(translator.text("tools.drop_folder"))
         self._pitch_output_card.setVisible(bool(self._pitch_text.toPlainText()))
 
     def resizeEvent(self, event: QResizeEvent) -> None:
@@ -235,7 +260,7 @@ class ToolsPage(QWidget):
         self._quality_run.setObjectName("PrimaryButton")
         self._quality_run.clicked.connect(self._start_quality)
         self._drop_area = DropArea()
-        self._drop_area.file_dropped.connect(self._quality_path.setText)
+        self._drop_area.path_dropped.connect(self._quality_path.setText)
         input_layout.addWidget(self._quality_input_title, 0, 0, 1, 3)
         input_layout.addWidget(self._quality_file_label, 1, 0)
         input_layout.addWidget(self._quality_path, 1, 1)
@@ -254,11 +279,12 @@ class ToolsPage(QWidget):
         self._quality_output_title.setObjectName("CardTitle")
         self._quality_meta = QLabel()
         self._quality_meta.setObjectName("MutedText")
-        self._quality_image = QLabel()
+        self._quality_image = PreviewImageLabel()
         self._quality_image.setObjectName("SpectrogramImage")
         self._quality_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._quality_image.setMinimumHeight(280)
+        self._quality_image.setMinimumHeight(520)
         self._quality_image.setScaledContents(False)
+        self._quality_image.preview_requested.connect(self._open_image_preview)
         nav = QHBoxLayout()
         self._quality_prev = QPushButton()
         self._quality_prev.setObjectName("GlassButton")
@@ -301,11 +327,14 @@ class ToolsPage(QWidget):
         self._duration_run = QPushButton()
         self._duration_run.setObjectName("PrimaryButton")
         self._duration_run.clicked.connect(self._start_duration)
+        self._duration_drop_area = DropArea(accept_folder=True)
+        self._duration_drop_area.path_dropped.connect(self._duration_path.setText)
         input_layout.addWidget(self._duration_input_title, 0, 0, 1, 3)
         input_layout.addWidget(self._duration_folder_label, 1, 0)
         input_layout.addWidget(self._duration_path, 1, 1)
         input_layout.addWidget(self._duration_choose, 1, 2)
-        input_layout.addWidget(self._duration_run, 2, 2)
+        input_layout.addWidget(self._duration_drop_area, 2, 0, 1, 3)
+        input_layout.addWidget(self._duration_run, 3, 2)
         input_layout.setColumnStretch(1, 1)
         layout.addWidget(input_card)
 
@@ -352,11 +381,14 @@ class ToolsPage(QWidget):
         self._pitch_run = QPushButton()
         self._pitch_run.setObjectName("PrimaryButton")
         self._pitch_run.clicked.connect(self._start_pitch)
+        self._pitch_drop_area = DropArea(accept_folder=True)
+        self._pitch_drop_area.path_dropped.connect(self._pitch_path.setText)
         input_layout.addWidget(self._pitch_input_title, 0, 0, 1, 3)
         input_layout.addWidget(self._pitch_folder_label, 1, 0)
         input_layout.addWidget(self._pitch_path, 1, 1)
         input_layout.addWidget(self._pitch_choose, 1, 2)
-        input_layout.addWidget(self._pitch_run, 2, 2)
+        input_layout.addWidget(self._pitch_drop_area, 2, 0, 1, 3)
+        input_layout.addWidget(self._pitch_run, 3, 2)
         input_layout.setColumnStretch(1, 1)
         layout.addWidget(input_card)
 
@@ -370,10 +402,11 @@ class ToolsPage(QWidget):
         self._pitch_text = QTextEdit()
         self._pitch_text.setObjectName("ReportText")
         self._pitch_text.setReadOnly(True)
-        self._pitch_plot = QLabel()
+        self._pitch_plot = PreviewImageLabel()
         self._pitch_plot.setObjectName("SpectrogramImage")
         self._pitch_plot.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._pitch_plot.setMinimumHeight(220)
+        self._pitch_plot.setMinimumHeight(420)
+        self._pitch_plot.preview_requested.connect(self._open_image_preview)
         output_layout.addWidget(self._pitch_output_title)
         output_layout.addWidget(self._pitch_text)
         output_layout.addWidget(self._pitch_plot)
@@ -452,6 +485,7 @@ class ToolsPage(QWidget):
         elif isinstance(result, PitchReport):
             self._pitch_output_card.setVisible(True)
             self._pitch_text.setPlainText(result.to_text())
+            self._pitch_plot_path = result.plot_path
             if result.plot_path is not None:
                 self._set_label_pixmap(self._pitch_plot, result.plot_path)
             else:
@@ -496,15 +530,40 @@ class ToolsPage(QWidget):
         pixmap = QPixmap(str(image_path))
         if pixmap.isNull():
             label.clear()
+            if isinstance(label, PreviewImageLabel):
+                label.set_image_path(None)
             return
+        if isinstance(label, PreviewImageLabel):
+            label.set_image_path(image_path)
         label.setPixmap(
             pixmap.scaled(
-                label.width() or 900,
-                label.height() or 360,
+                label.width() or pixmap.width(),
+                label.height() or pixmap.height(),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
         )
+
+    @Slot(object)
+    def _open_image_preview(self, image_path: Path) -> None:
+        pixmap = QPixmap(str(image_path))
+        if pixmap.isNull():
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle(str(image_path.name))
+        dialog.resize(min(1280, max(900, pixmap.width())), min(860, max(620, pixmap.height())))
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(14, 14, 14, 14)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(False)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        image = QLabel()
+        image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        image.setPixmap(pixmap)
+        image.resize(pixmap.size())
+        scroll.setWidget(image)
+        layout.addWidget(scroll)
+        dialog.exec()
 
     def _refresh_output_images(self) -> None:
         if self._quality_result is not None and self._quality_result.segments:
@@ -512,13 +571,8 @@ class ToolsPage(QWidget):
                 self._quality_image,
                 self._quality_result.segments[self._quality_segment_index].image_path,
             )
-        if self._pitch_output_card.isVisible():
-            text = self._pitch_text.toPlainText()
-            marker = "Distribution plot: "
-            for line in text.splitlines():
-                if line.startswith(marker):
-                    self._set_label_pixmap(self._pitch_plot, Path(line[len(marker) :]))
-                    break
+        if self._pitch_output_card.isVisible() and self._pitch_plot_path is not None:
+            self._set_label_pixmap(self._pitch_plot, self._pitch_plot_path)
 
     def _set_buttons_enabled(self, enabled: bool) -> None:
         for button in (

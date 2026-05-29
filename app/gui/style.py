@@ -171,7 +171,7 @@ QTextEdit:focus {{
     background: rgba(255, 255, 255, 0.032);
     border: 1px dashed rgba(255, 255, 255, 0.30);
     border-radius: 8px;
-    min-height: 96px;
+    min-height: 84px;
 }}
 
 #SpectrogramImage {{
