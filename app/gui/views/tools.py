@@ -245,6 +245,7 @@ class ToolsPage(QWidget):
 
         input_card = QFrame()
         input_card.setObjectName("GlassCard")
+        input_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         input_layout = QGridLayout(input_card)
         input_layout.setContentsMargins(18, 16, 18, 16)
         input_layout.setHorizontalSpacing(10)
@@ -272,6 +273,7 @@ class ToolsPage(QWidget):
 
         self._quality_output_card = QFrame()
         self._quality_output_card.setObjectName("GlassCard")
+        self._quality_output_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         output_layout = QVBoxLayout(self._quality_output_card)
         output_layout.setContentsMargins(18, 16, 18, 16)
         output_layout.setSpacing(12)
@@ -301,6 +303,7 @@ class ToolsPage(QWidget):
         output_layout.addLayout(nav)
         self._quality_output_card.setVisible(False)
         layout.addWidget(self._quality_output_card)
+        layout.addStretch(1)
         return page
 
     def _build_duration_page(self) -> QWidget:
@@ -313,6 +316,7 @@ class ToolsPage(QWidget):
 
         input_card = QFrame()
         input_card.setObjectName("GlassCard")
+        input_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         input_layout = QGridLayout(input_card)
         input_layout.setContentsMargins(18, 16, 18, 16)
         input_layout.setHorizontalSpacing(10)
@@ -340,6 +344,7 @@ class ToolsPage(QWidget):
 
         self._duration_output_card = QFrame()
         self._duration_output_card.setObjectName("GlassCard")
+        self._duration_output_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         output_layout = QVBoxLayout(self._duration_output_card)
         output_layout.setContentsMargins(18, 16, 18, 16)
         output_layout.setSpacing(12)
@@ -355,6 +360,7 @@ class ToolsPage(QWidget):
         output_layout.addWidget(self._duration_detail)
         self._duration_output_card.setVisible(False)
         layout.addWidget(self._duration_output_card)
+        layout.addStretch(1)
         return page
 
     def _build_pitch_page(self) -> QWidget:
@@ -367,6 +373,7 @@ class ToolsPage(QWidget):
 
         input_card = QFrame()
         input_card.setObjectName("GlassCard")
+        input_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         input_layout = QGridLayout(input_card)
         input_layout.setContentsMargins(18, 16, 18, 16)
         input_layout.setHorizontalSpacing(10)
@@ -394,6 +401,7 @@ class ToolsPage(QWidget):
 
         self._pitch_output_card = QFrame()
         self._pitch_output_card.setObjectName("GlassCard")
+        self._pitch_output_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         output_layout = QVBoxLayout(self._pitch_output_card)
         output_layout.setContentsMargins(18, 16, 18, 16)
         output_layout.setSpacing(12)
@@ -412,6 +420,7 @@ class ToolsPage(QWidget):
         output_layout.addWidget(self._pitch_plot)
         self._pitch_output_card.setVisible(False)
         layout.addWidget(self._pitch_output_card)
+        layout.addStretch(1)
         return page
 
     @Slot(int)
