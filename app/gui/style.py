@@ -24,6 +24,8 @@ QWidget {{
 #SeparateContent,
 #SlicerPage,
 #SlicerContent,
+#SettingsPage,
+#SettingsContent,
 QScrollArea#TransparentScrollArea,
 QScrollArea#TransparentScrollArea > QWidget {{
     background: transparent;
