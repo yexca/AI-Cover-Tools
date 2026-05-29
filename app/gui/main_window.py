@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QMainWindow, QStackedWidget, 
 from .appearance import AppearanceSettings
 from .i18n import Translator
 from .style import build_style
-from .views import PlaceholderPage, SeparatePage, SettingsPage, SlicerPage
+from .views import PlaceholderPage, SeparatePage, SettingsPage, SlicerPage, ToolsPage
 from .widgets import BackgroundWidget, BlurLayer, NavigationItem, NavigationRail, TintLayer
 
 
@@ -20,7 +20,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._translator = translator
         self._pages: dict[str, int] = {}
-        self._page_widgets: list[PlaceholderPage | SeparatePage | SettingsPage | SlicerPage] = []
+        self._page_widgets: list[PlaceholderPage | SeparatePage | SettingsPage | SlicerPage | ToolsPage] = []
         self._appearance = AppearanceSettings()
 
         self.setWindowTitle(translator.text("app.title"))
@@ -95,7 +95,7 @@ class MainWindow(QMainWindow):
         ]
 
     def _add_pages(self) -> None:
-        for key in ("home", "train", "inference", "tools", "about"):
+        for key in ("home", "train", "inference", "about"):
             page = PlaceholderPage(f"page.{key}.title", f"page.{key}.body", self._translator)
             self._page_widgets.append(page)
             self._pages[key] = self._stack.addWidget(page)
@@ -109,6 +109,11 @@ class MainWindow(QMainWindow):
         slicer_page.status_changed.connect(self.statusBar().showMessage)
         self._page_widgets.append(slicer_page)
         self._pages["slicer"] = self._stack.addWidget(slicer_page)
+
+        tools_page = ToolsPage(self._translator)
+        tools_page.status_changed.connect(self.statusBar().showMessage)
+        self._page_widgets.append(tools_page)
+        self._pages["tools"] = self._stack.addWidget(tools_page)
 
         settings_page = SettingsPage(self._translator, self._appearance)
         settings_page.background_changed.connect(self._set_background_image)

@@ -35,6 +35,8 @@ Design direction:
 - Separate model cards can be reordered; card order is the execution order.
 - The Slicer page is implemented as two glass cards: input/output controls and slicing settings.
 - Slicing runs in a background thread so the GUI stays responsive while audio files are processed.
+- The Tools page uses a top function selector and switches the cards below it between audio quality, total duration, and pitch analysis.
+- Tools workflows run outside the GUI layer under `app/tools`; long-running work uses background threads.
 - The Settings page uses glass cards grouped by background effects and color/tint controls.
 - The first GUI version is growing page by page; Train and Inference remain placeholders.
 

@@ -24,6 +24,8 @@ QWidget {{
 #SeparateContent,
 #SlicerPage,
 #SlicerContent,
+#ToolsPage,
+#ToolsContent,
 #SettingsPage,
 #SettingsContent,
 QScrollArea#TransparentScrollArea,
@@ -91,6 +93,7 @@ QPushButton:checked {{
 QPushButton#GlassButton,
 QPushButton#PrimaryButton,
 QPushButton#DangerButton,
+QPushButton#SegmentButton,
 QPushButton#IconTextButton,
 QToolButton#IconButton,
 QComboBox#LanguageCombo {{
@@ -102,9 +105,20 @@ QComboBox#LanguageCombo {{
 }}
 
 QPushButton#GlassButton:hover,
+QPushButton#SegmentButton:hover,
 QToolButton#IconButton:hover,
 QComboBox#LanguageCombo:hover {{
     background: rgba(255, 255, 255, 0.095);
+}}
+
+QPushButton#SegmentButton {{
+    min-width: 112px;
+    text-align: center;
+}}
+
+QPushButton#SegmentButton:checked {{
+    background: rgba(74, 132, 255, 0.34);
+    border: 1px solid rgba(156, 190, 255, 0.48);
 }}
 
 QComboBox#LanguageCombo::drop-down {{
@@ -136,7 +150,8 @@ QComboBox QAbstractItemView::item:selected {{
 QLineEdit,
 QSpinBox,
 QDoubleSpinBox,
-QComboBox {{
+QComboBox,
+QTextEdit {{
     background: rgba(255, 255, 255, 0.055);
     border: 1px solid rgba(255, 255, 255, 0.16);
     border-radius: 6px;
@@ -147,8 +162,31 @@ QComboBox {{
 QLineEdit:focus,
 QSpinBox:focus,
 QDoubleSpinBox:focus,
-QComboBox:focus {{
+QComboBox:focus,
+QTextEdit:focus {{
     border: 1px solid rgba(255, 255, 255, 0.34);
+}}
+
+#DropArea {{
+    background: rgba(255, 255, 255, 0.032);
+    border: 1px dashed rgba(255, 255, 255, 0.30);
+    border-radius: 8px;
+    min-height: 96px;
+}}
+
+#SpectrogramImage {{
+    background: rgba(8, 10, 14, 0.46);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+}}
+
+#ResultText {{
+    font-size: 28px;
+    font-weight: 700;
+}}
+
+QTextEdit#ReportText {{
+    min-height: 220px;
 }}
 
 QPushButton#PrimaryButton {{

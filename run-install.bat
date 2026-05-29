@@ -39,6 +39,9 @@ if errorlevel 1 goto :error
 call :ensure_onnxruntime
 if errorlevel 1 goto :error
 
+call :ensure_tools_dependencies
+if errorlevel 1 goto :error
+
 "%PYTHON_CMD%" -c "import torch; print('Torch CUDA available:', torch.cuda.is_available()); print('Torch version:', torch.__version__); print('CUDA version:', torch.version.cuda); print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none')"
 "%PYTHON_CMD%" -c "from PySide6.QtWidgets import QApplication; print('PySide6 GUI available')"
 if errorlevel 1 goto :error
@@ -146,6 +149,15 @@ if errorlevel 1 (
     exit /b 0
 )
 exit /b 0
+
+:ensure_tools_dependencies
+echo Checking tools dependencies...
+"%PYTHON_CMD%" -c "import PIL, parselmouth, scipy; print('Tools dependencies already available')"
+if not errorlevel 1 exit /b 0
+
+echo Installing tools dependencies...
+"%PYTHON_CMD%" -m pip install Pillow praat-parselmouth scipy
+exit /b %errorlevel%
 
 :error
 echo Installation failed. Please check the messages above.
