@@ -133,6 +133,7 @@ QComboBox QAbstractItemView::item:selected {{
 
 QLineEdit,
 QSpinBox,
+QDoubleSpinBox,
 QComboBox {{
     background: rgba(255, 255, 255, 0.055);
     border: 1px solid rgba(255, 255, 255, 0.16);
@@ -143,6 +144,7 @@ QComboBox {{
 
 QLineEdit:focus,
 QSpinBox:focus,
+QDoubleSpinBox:focus,
 QComboBox:focus {{
     border: 1px solid rgba(255, 255, 255, 0.34);
 }}
