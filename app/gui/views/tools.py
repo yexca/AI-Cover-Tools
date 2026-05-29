@@ -22,10 +22,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...tools import AudioQualityResult, DurationSummary, PitchReport
-from ...tools import analyze_audio_quality, analyze_dataset_pitch, calculate_total_duration
+from ...tools import AudioQualityResult, DurationSummary, NormalizeResult, PitchReport
+from ...tools import analyze_audio_quality, analyze_dataset_pitch, calculate_total_duration, normalize_audio_directory
 from ..i18n import Translator
 from ..paths import PROJECT_ROOT
+from ..widgets import WheelDisabledDoubleSpinBox
 
 
 class DropArea(QFrame):
@@ -94,10 +95,18 @@ class ToolWorker(QObject):
     finished = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, mode: str, path: Path) -> None:
+    def __init__(
+        self,
+        mode: str,
+        path: Path,
+        output_path: Path | None = None,
+        target_peak_db: float = -3.0,
+    ) -> None:
         super().__init__()
         self._mode = mode
         self._path = path
+        self._output_path = output_path
+        self._target_peak_db = target_peak_db
 
     @Slot()
     def run(self) -> None:
@@ -108,6 +117,10 @@ class ToolWorker(QObject):
                 result = calculate_total_duration(self._path)
             elif self._mode == "pitch":
                 result = analyze_dataset_pitch(self._path, PROJECT_ROOT / "outputs")
+            elif self._mode == "normalize":
+                if self._output_path is None:
+                    raise ValueError("output_path")
+                result = normalize_audio_directory(self._path, self._output_path, self._target_peak_db)
             else:
                 raise ValueError(self._mode)
             self.finished.emit(result)
@@ -171,9 +184,11 @@ class ToolsPage(QWidget):
         self._quality_button = self._create_selector_button("quality", 0)
         self._duration_button = self._create_selector_button("duration", 1)
         self._pitch_button = self._create_selector_button("pitch", 2)
+        self._normalize_button = self._create_selector_button("normalize", 3)
         selector_layout.addWidget(self._quality_button)
         selector_layout.addWidget(self._duration_button)
         selector_layout.addWidget(self._pitch_button)
+        selector_layout.addWidget(self._normalize_button)
         selector_layout.addStretch(1)
         layout.addWidget(self._selector_card)
 
@@ -181,6 +196,7 @@ class ToolsPage(QWidget):
         self._stack.addWidget(self._build_quality_page())
         self._stack.addWidget(self._build_duration_page())
         self._stack.addWidget(self._build_pitch_page())
+        self._stack.addWidget(self._build_normalize_page())
         layout.addWidget(self._stack)
         layout.addStretch(1)
 
@@ -195,6 +211,7 @@ class ToolsPage(QWidget):
         self._quality_button.setText(translator.text("tools.quality"))
         self._duration_button.setText(translator.text("tools.duration"))
         self._pitch_button.setText(translator.text("tools.pitch"))
+        self._normalize_button.setText(translator.text("tools.normalize"))
 
         self._quality_input_title.setText(translator.text("tools.input"))
         self._quality_output_title.setText(translator.text("tools.output"))
@@ -221,6 +238,18 @@ class ToolsPage(QWidget):
         self._pitch_run.setText(translator.text("tools.analyze"))
         self._pitch_drop_area.set_text(translator.text("tools.drop_folder"))
         self._pitch_output_card.setVisible(bool(self._pitch_text.toPlainText()))
+
+        self._normalize_input_title.setText(translator.text("tools.input"))
+        self._normalize_output_title.setText(translator.text("tools.output"))
+        self._normalize_input_label.setText(translator.text("tools.input_folder"))
+        self._normalize_input_choose.setText(translator.text("settings.choose"))
+        self._normalize_input_drop_area.set_text(translator.text("tools.drop_input_folder"))
+        self._normalize_output_label.setText(translator.text("tools.output_folder"))
+        self._normalize_output_choose.setText(translator.text("settings.choose"))
+        self._normalize_output_drop_area.set_text(translator.text("tools.drop_output_folder"))
+        self._normalize_peak_label.setText(translator.text("tools.target_peak"))
+        self._normalize_run.setText(translator.text("tools.normalize.run"))
+        self._normalize_output_card.setVisible(bool(self._normalize_text.text()))
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
@@ -423,9 +452,86 @@ class ToolsPage(QWidget):
         layout.addStretch(1)
         return page
 
+    def _build_normalize_page(self) -> QWidget:
+        page = QWidget()
+        page.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        page.setAutoFillBackground(False)
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+
+        input_card = QFrame()
+        input_card.setObjectName("GlassCard")
+        input_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        input_layout = QGridLayout(input_card)
+        input_layout.setContentsMargins(18, 16, 18, 16)
+        input_layout.setHorizontalSpacing(10)
+        input_layout.setVerticalSpacing(12)
+
+        self._normalize_input_title = QLabel()
+        self._normalize_input_title.setObjectName("CardTitle")
+        self._normalize_input_label = QLabel()
+        self._normalize_input_path = QLineEdit(str(PROJECT_ROOT / "inputs"))
+        self._normalize_input_choose = QPushButton()
+        self._normalize_input_choose.setObjectName("GlassButton")
+        self._normalize_input_choose.clicked.connect(lambda: self._choose_folder(self._normalize_input_path))
+        self._normalize_input_drop_area = DropArea(accept_folder=True)
+        self._normalize_input_drop_area.path_dropped.connect(self._normalize_input_path.setText)
+
+        self._normalize_output_label = QLabel()
+        self._normalize_output_path = QLineEdit(str(PROJECT_ROOT / "outputs"))
+        self._normalize_output_choose = QPushButton()
+        self._normalize_output_choose.setObjectName("GlassButton")
+        self._normalize_output_choose.clicked.connect(lambda: self._choose_folder(self._normalize_output_path))
+        self._normalize_output_drop_area = DropArea(accept_folder=True)
+        self._normalize_output_drop_area.path_dropped.connect(self._normalize_output_path.setText)
+
+        self._normalize_peak_label = QLabel()
+        self._normalize_peak = WheelDisabledDoubleSpinBox()
+        self._normalize_peak.setRange(-60.0, 0.0)
+        self._normalize_peak.setDecimals(1)
+        self._normalize_peak.setSingleStep(0.5)
+        self._normalize_peak.setValue(-3.0)
+        self._normalize_run = QPushButton()
+        self._normalize_run.setObjectName("PrimaryButton")
+        self._normalize_run.clicked.connect(self._start_normalize)
+
+        input_layout.addWidget(self._normalize_input_title, 0, 0, 1, 3)
+        input_layout.addWidget(self._normalize_input_label, 1, 0)
+        input_layout.addWidget(self._normalize_input_path, 1, 1)
+        input_layout.addWidget(self._normalize_input_choose, 1, 2)
+        input_layout.addWidget(self._normalize_input_drop_area, 2, 0, 1, 3)
+        input_layout.addWidget(self._normalize_output_label, 3, 0)
+        input_layout.addWidget(self._normalize_output_path, 3, 1)
+        input_layout.addWidget(self._normalize_output_choose, 3, 2)
+        input_layout.addWidget(self._normalize_output_drop_area, 4, 0, 1, 3)
+        input_layout.addWidget(self._normalize_peak_label, 5, 0)
+        input_layout.addWidget(self._normalize_peak, 5, 1)
+        input_layout.addWidget(self._normalize_run, 5, 2)
+        input_layout.setColumnStretch(1, 1)
+        layout.addWidget(input_card)
+
+        self._normalize_output_card = QFrame()
+        self._normalize_output_card.setObjectName("GlassCard")
+        self._normalize_output_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        output_layout = QVBoxLayout(self._normalize_output_card)
+        output_layout.setContentsMargins(18, 16, 18, 16)
+        output_layout.setSpacing(12)
+        self._normalize_output_title = QLabel()
+        self._normalize_output_title.setObjectName("CardTitle")
+        self._normalize_text = QLabel()
+        self._normalize_text.setObjectName("MutedText")
+        self._normalize_text.setWordWrap(True)
+        output_layout.addWidget(self._normalize_output_title)
+        output_layout.addWidget(self._normalize_text)
+        self._normalize_output_card.setVisible(False)
+        layout.addWidget(self._normalize_output_card)
+        layout.addStretch(1)
+        return page
+
     @Slot(int)
     def _switch_tool(self, button_id: int) -> None:
-        modes = ["quality", "duration", "pitch"]
+        modes = ["quality", "duration", "pitch", "normalize"]
         self._current_mode = modes[button_id]
         self._stack.setCurrentIndex(button_id)
 
@@ -453,16 +559,33 @@ class ToolsPage(QWidget):
     def _start_pitch(self) -> None:
         self._start_worker("pitch", Path(self._pitch_path.text()))
 
-    def _start_worker(self, mode: str, path: Path) -> None:
+    def _start_normalize(self) -> None:
+        self._start_worker(
+            "normalize",
+            Path(self._normalize_input_path.text()),
+            Path(self._normalize_output_path.text()),
+            self._normalize_peak.value(),
+        )
+
+    def _start_worker(
+        self,
+        mode: str,
+        path: Path,
+        output_path: Path | None = None,
+        target_peak_db: float = -3.0,
+    ) -> None:
         if self._thread is not None:
             return
         if not str(path).strip():
             self._set_message(self._translator.text("tools.error.empty_path"))
             return
+        if mode == "normalize" and (output_path is None or not str(output_path).strip()):
+            self._set_message(self._translator.text("tools.error.empty_path"))
+            return
         self._set_buttons_enabled(False)
         self._set_message(self._translator.text(f"tools.{mode}.running"))
         self._thread = QThread(self)
-        self._worker = ToolWorker(mode, path)
+        self._worker = ToolWorker(mode, path, output_path, target_peak_db)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.finished.connect(self._handle_finished)
@@ -500,6 +623,26 @@ class ToolsPage(QWidget):
             else:
                 self._pitch_plot.clear()
             self._set_message(self._translator.text("tools.pitch.done").format(frames=result.voiced_frames))
+        elif isinstance(result, NormalizeResult):
+            self._normalize_output_card.setVisible(True)
+            if result.failed_count:
+                self._normalize_text.setText(
+                    self._translator.text("tools.normalize.done_with_errors").format(
+                        success=result.success_count,
+                        failed=result.failed_count,
+                        files=result.file_count,
+                        output=result.output_dir,
+                    )
+                )
+            else:
+                self._normalize_text.setText(
+                    self._translator.text("tools.normalize.done").format(
+                        files=result.success_count,
+                        peak=result.target_peak_db,
+                        output=result.output_dir,
+                    )
+                )
+            self._set_message(self._normalize_text.text())
 
     @Slot(str)
     def _handle_failed(self, message: str) -> None:
@@ -588,9 +731,12 @@ class ToolsPage(QWidget):
             self._quality_run,
             self._duration_run,
             self._pitch_run,
+            self._normalize_run,
             self._quality_choose,
             self._duration_choose,
             self._pitch_choose,
+            self._normalize_input_choose,
+            self._normalize_output_choose,
         ):
             button.setEnabled(enabled)
 

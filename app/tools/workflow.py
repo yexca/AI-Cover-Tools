@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import os
 import shutil
 import subprocess
 import sys
@@ -49,6 +50,17 @@ class DurationSummary:
         minutes = (seconds % 3600) // 60
         remaining = seconds % 60
         return f"{hours} h {minutes} m {remaining} s"
+
+
+@dataclass(frozen=True)
+class NormalizeResult:
+    input_dir: Path
+    output_dir: Path
+    target_peak_db: float
+    file_count: int
+    success_count: int
+    failed_count: int
+    failed_files: list[str]
 
 
 @dataclass(frozen=True)
@@ -177,6 +189,53 @@ def calculate_total_duration(directory: Path) -> DurationSummary:
     return DurationSummary(directory=directory, file_count=len(files), failed_count=failed_count, total_seconds=total_seconds)
 
 
+def normalize_audio_directory(input_dir: Path, output_dir: Path, target_peak_db: float = -3.0) -> NormalizeResult:
+    input_dir = input_dir.expanduser().resolve()
+    output_dir = output_dir.expanduser().resolve()
+    if not input_dir.is_dir():
+        raise FileNotFoundError(input_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    files = iter_audio_files(input_dir)
+    failed_files: list[str] = []
+    for source_path in files:
+        relative_path = source_path.relative_to(input_dir)
+        destination_path = (output_dir / relative_path).with_suffix(source_path.suffix)
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        command = [
+            sys.executable,
+            "-m",
+            "ffmpeg_normalize",
+            str(source_path),
+            "-nt",
+            "peak",
+            "-t",
+            f"{target_peak_db:g}",
+            "-ext",
+            source_path.suffix.lstrip(".") or "wav",
+            "-o",
+            str(destination_path),
+            "-f",
+        ]
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True, env=_subprocess_env())
+        except subprocess.CalledProcessError as exc:
+            error = (exc.stderr or exc.stdout or "").strip().splitlines()
+            failed_files.append(f"{source_path.name}: {error[-1] if error else type(exc).__name__}")
+        except Exception as exc:
+            failed_files.append(f"{source_path.name}: {type(exc).__name__}")
+
+    return NormalizeResult(
+        input_dir=input_dir,
+        output_dir=output_dir,
+        target_peak_db=target_peak_db,
+        file_count=len(files),
+        success_count=len(files) - len(failed_files),
+        failed_count=len(failed_files),
+        failed_files=failed_files,
+    )
+
+
 def analyze_dataset_pitch(directory: Path, output_root: Path, outlier_percentile: float = 1.0) -> PitchReport:
     try:
         import parselmouth
@@ -274,10 +333,23 @@ def _probe_duration(path: Path) -> float | None:
             check=True,
             capture_output=True,
             text=True,
+            env=_subprocess_env(),
         )
         return float(completed.stdout.strip())
     except Exception:
         return None
+
+
+def _subprocess_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env_root = Path(sys.executable).resolve().parent
+    path_entries = [
+        env_root,
+        env_root / "Scripts",
+        env_root / "Library" / "bin",
+    ]
+    env["PATH"] = os.pathsep.join(str(path) for path in path_entries if path.exists()) + os.pathsep + env.get("PATH", "")
+    return env
 
 
 def _find_ffprobe() -> Path | None:
