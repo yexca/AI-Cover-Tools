@@ -2,77 +2,153 @@
 
 The GUI uses PySide6 and lives under `app/gui`.
 
-Current structure:
+## Structure
 
 ```text
 app/gui/
-  __main__.py
-  application.py
-  bootstrap.py
-  icons.py
-  main_window.py
-  paths.py
-  style.py
-  assets/
-    icons/
-  i18n/
-  views/
-  widgets/
+  application.py        QApplication and MainWindow startup
+  bootstrap.py          Windows DLL path setup for local env
+  icons.py              SVG icon loading helpers
+  main_window.py        shell, navigation, stacked pages, background
+  paths.py              project and asset paths
+  style.py              global Qt stylesheet
+  appearance.py         live appearance settings dataclass
+  assets/icons/         navigation and window chrome SVGs
+  i18n/                 translator and dictionaries
+  storage/              GUI persistence helpers
+  views/                page widgets
+  widgets/              reusable controls and shell widgets
 ```
 
-Design direction:
+## Shell
 
-- WinUI-like shell with a left navigation rail and a right content area.
-- Navigation items include Home, Separate, Slicer, Train, Inference, Settings, and About.
-- The navigation rail supports expanded `icon + text` mode and collapsed `icon only` mode.
-- Navigation icons are local SVG assets under `app/gui/assets/icons`.
-- Navigation icons use a small rotation animation on hover and selection.
-- The visual style uses a blurred full-window background layer over `sample/76371065_p0.png`.
-- The background is dark-tinted before the card panels are drawn so text remains readable.
-- Navigation, content, language controls, and settings controls are translucent dark glass panels.
-- The Settings page currently supports changing the background image, blur radius, and text color for live preview.
-- The Separate page uses card-based modules. Presets appear first, common model settings second, and pipeline model cards below.
-- Separate model cards can be reordered; card order is the execution order.
-- The Slicer page is implemented as two glass cards: input/output controls and slicing settings.
-- Slicing runs in a background thread so the GUI stays responsive while audio files are processed.
-- The Tools page uses a top function selector and switches the cards below it between audio quality, total duration, and pitch analysis.
-- Tools workflows run outside the GUI layer under `app/tools`; long-running work uses background threads.
-- The Settings page uses glass cards grouped by background effects and color/tint controls.
-- The first GUI version is growing page by page; Train and Inference remain placeholders.
+The main window is a WinUI-like desktop shell:
 
-Internationalization:
+- background image layer
+- blur layer
+- tint layer
+- custom title bar when frameless window chrome is enabled
+- left navigation rail
+- right content panel with a `QStackedWidget`
+- status bar for current task messages
 
-- Language is resolved from the system locale.
-- Supported languages are Simplified Chinese, English, and Japanese.
-- If locale detection fails or the language is unsupported, English is used.
-- Translation strings are currently plain Python dictionaries in `app/gui/i18n/translations.py`.
-- A language selector lives at the lower-left of the navigation rail and updates visible text immediately.
+The navigation rail includes:
 
-Run the GUI:
+- Home
+- Separate
+- Slicer
+- Train
+- Inference
+- Tools
+- Settings
+- About
+
+Home, Train, Inference, and About are currently placeholder pages.
+
+## Implemented Pages
+
+### Separate
+
+Card layout:
+
+- Presets
+- Common settings
+- Ordered model module cards
+
+The page runs the CLI separation workflow with a generated config file under `user_data/gui_separate_config.py`. It uses `QProcess` so output can stream into the GUI and the run can be stopped.
+
+### Slicer
+
+Card layout:
+
+- Input and output
+- Slicing settings
+
+The page runs `app.slicer.run_slicer` in a background `QThread`.
+
+### Tools
+
+Card layout:
+
+- top function selector
+- input card
+- output card
+
+Implemented tools:
+
+- Audio quality spectrogram
+- Total duration
+- Pitch report
+- Peak normalize
+
+The page runs tool workflows in a background `QThread`.
+
+### Settings
+
+Card layout:
+
+- Background
+- Color and tint
+
+The page emits live appearance signals for:
+
+- background image
+- blur radius
+- text color
+- tint color
+- tint opacity
+
+These settings are live preview only in the current implementation.
+
+## Internationalization
+
+Translations are plain dictionaries in `app/gui/i18n/translations.py`.
+
+Supported locales:
+
+- `en`
+- `zh_CN`
+- `ja`
+
+Locale resolution:
+
+1. Use the explicit locale if supplied.
+2. Otherwise detect the system locale.
+3. Fall back to English when unsupported.
+
+Every page implements `retranslate(translator)` and receives language changes from `MainWindow`.
+
+## Styling
+
+Global styling is in `app/gui/style.py`.
+
+Common object names:
+
+- `GlassCard`
+- `PrimaryButton`
+- `DangerButton`
+- `GlassButton`
+- `SegmentButton`
+- `DropArea`
+- `SpectrogramImage`
+- `ReportText`
+
+When adding new pages:
+
+- Use a transparent `QScrollArea`.
+- Use `GlassCard` for cards.
+- Keep long tasks off the GUI thread.
+- Give cards fixed vertical size policies when a stacked page could otherwise stretch them.
+- Put processing code in a workflow module, not in `app/gui/views`.
+
+## Run
 
 ```bat
 run-gui.bat
 ```
 
-Or directly:
+Directly:
 
 ```bat
 env\python.exe -m app.gui
 ```
-
-Environment setup:
-
-- `run-install.bat` only manages the project-local `env`.
-- If `env/python.exe` exists, the installer reuses it.
-- If `env/python.exe` is missing, the installer downloads Miniconda into `env/conda` and creates `env`.
-- The installer checks whether PySide6 is usable inside the local `env`.
-- If PySide6 is missing or Qt cannot import, the installer tries conda-forge first.
-- If conda installation fails, it falls back to pip.
-- PySide6 is pinned to `6.8.1`, matching the sample project under `sample/pyside6-getting-started`.
-
-Recommended growth path:
-
-- Keep each page under `app/gui/views`.
-- Keep reusable controls under `app/gui/widgets`.
-- Use background worker classes for long tasks so separation, slicing, training, and inference do not freeze the UI.
-- Keep actual audio processing in the workflow modules.

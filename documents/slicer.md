@@ -1,35 +1,83 @@
-# Slicer Module
+# Slicer
 
-`app/slicer` contains the audio slicing workflow for preparing training clips after separation.
+`app/slicer` prepares training clips from audio files.
 
-Files:
+## Files
 
-- `engine.py`: local copy of the `audio-slicer` RMS silence-detection algorithm.
-- `workflow.py`: folder scanning, streaming RMS analysis, slice writing, and result dataclasses.
+- `engine.py`: local copy of the RMS silence-detection slicer.
+- `workflow.py`: recursive scanning, streaming RMS analysis, clip writing, and result dataclasses.
 
-The GUI Slicer page is organized as two glass cards:
+## Workflow API
 
-- Input and output: input folder, output folder, output format, and start button.
-- Slicing settings: threshold, minimum clip length, minimum silence interval, hop size, and maximum kept silence length.
+```python
+from app.slicer import SlicerSettings, run_slicer
 
-Defaults:
+result = run_slicer(
+    input_dir="inputs",
+    output_dir="outputs",
+    output_format="wav",
+    settings=SlicerSettings(),
+)
+```
+
+`run_slicer` returns `SlicerRunResult`.
+
+## GUI Page
+
+Cards:
+
+- Input and output
+- Slicing settings
+
+Input and output card:
+
+- input folder
+- output folder
+- output format
+- start button
+
+Settings card:
 
 | Setting | Default |
 | --- | --- |
-| Input folder | `inputs` |
-| Output folder | `outputs` |
-| Output format | `wav` |
-| Threshold (dB) | `-40` |
-| Minimum Length (ms) | `5000` |
-| Minimum Interval (ms) | `300` |
-| Hop Size (ms) | `10` |
-| Maximum Size Length (ms) | `1000` |
+| Threshold | `-40.0 dB` |
+| Minimum Length | `5000 ms` |
+| Minimum Interval | `300 ms` |
+| Hop Size | `10 ms` |
+| Maximum Size Length | `1000 ms` |
 
-Processing behavior:
+The GUI validates:
+
+- minimum length >= minimum interval
+- minimum interval >= hop size
+- maximum kept silence >= hop size
+
+The task runs in a `QThread`.
+
+## Processing Behavior
 
 1. Recursively scan the input folder for supported audio files.
-2. Analyze each file with the `audio-slicer` RMS algorithm.
-3. Write clips under `outputs/<source-name>/`.
-4. Keep the GUI responsive by running slicing in a background thread.
+2. Analyze each file with the RMS slicer.
+3. Write clips under `output_dir/<source-stem>/`.
+4. Return per-file success, generated paths, and errors.
 
-Supported output formats are `wav`, `flac`, and `mp3`. Actual MP3 read/write support depends on the installed `libsndfile` backend used by `soundfile`.
+Supported input suffixes:
+
+- `.wav`
+- `.flac`
+- `.mp3`
+- `.m4a`
+- `.aac`
+- `.ogg`
+- `.opus`
+- `.wma`
+- `.aiff`
+- `.aif`
+
+Supported output formats:
+
+- `wav`
+- `flac`
+- `mp3`
+
+MP3 support depends on the installed `libsndfile` backend used by `soundfile`.

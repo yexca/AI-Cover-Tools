@@ -1,13 +1,15 @@
 # Configuration
 
-Configuration is split into two layers:
+Configuration has two layers:
 
-- `config.py`: user-facing CLI configuration. Keep commonly edited model pipeline and shared model parameters here.
-- `app/config/defaults.py`: application defaults for paths, preprocessing, dependency setup, separator defaults, and future GUI defaults.
+- `app/config/defaults.py`: application defaults.
+- `config.py`: user-facing CLI overrides.
 
-The loader merges `app/config/defaults.py` first, then overlays `config.py`.
+The loader reads defaults first and overlays user config.
 
-Root `config.py` currently owns:
+## Root Config
+
+Root `config.py` currently owns the most commonly edited separation keys:
 
 - `MODEL_BATCH_SIZE`
 - `MODEL_OVERLAP`
@@ -15,52 +17,7 @@ Root `config.py` currently owns:
 - `MODEL_OVERRIDE_SEGMENT_SIZE`
 - `MODEL_PIPELINE`
 
-Shared model parameters are applied to every `MODEL_PIPELINE` step unless that step explicitly overrides the same key.
-
-Default paths:
-
-- `ROOT_DIR`: project root.
-- `INPUTS_DIR`: source audio folders. The program reads from here and does not modify user audio.
-- `WORK_OUTPUTS_DIR`: intermediate outputs.
-- `ARCHIVE_DIR`: completed run folders.
-- `MODELS_DIR`: local model cache for `audio-separator`.
-
-Preprocessing:
-
-- `PREPROCESS_INPUTS`: enables copy/convert into stable WAV files.
-- `PREPROCESS_WAV_CODEC`: WAV codec used for conversion.
-- `PREPROCESS_SAMPLE_RATE`: optional sample rate override.
-- `PREPROCESS_CHANNELS`: optional channel count override.
-- `PREPROCESS_OVERWRITE`: whether to replace existing preprocessed files.
-
-Runtime:
-
-- `AUDIO_EXTENSIONS`: accepted source audio suffixes.
-- `RECURSIVE_INPUT_SCAN`: scans nested files inside input group folders.
-- `STOP_ON_ERROR`: stops the whole run when a group or model step fails.
-- `CLEAN_WORK_OUTPUTS_BEFORE_RUN`: clears `outputs` before starting.
-- `LOG_LEVEL`: console and file logging level.
-
-Dependency setup defaults:
-
-- `USE_LOCAL_AUDIO_SEPARATOR_SOURCE`: use `sample/python-audio-separator` when available.
-- `AUDIO_SEPARATOR_SOURCE_DIR`: local source checkout path.
-- `AUDIO_SEPARATOR_INSTALL_EXTRA`: `gpu`, `cpu`, or `dml`.
-- `PYTORCH_CUDA_INDEX_URLS`: CUDA wheel indexes tried by the installer.
-- `AUTO_INSTALL_DEPENDENCIES`: allows automatic dependency installation.
-- `VERIFY_RELATED_MODEL_FILES`: lets `audio-separator` fetch related model data files.
-
-GUI dependency:
-
-- PySide6 is installed by `run-install.bat` into the local conda environment.
-- The installer first checks whether `from PySide6.QtWidgets import QApplication` works.
-- If it does not work, the installer tries conda-forge, then pip as a fallback.
-- The installer does not inspect or reuse system Python or system conda.
-- If the project `env` exists, it uses that local env directly.
-- If the project `env` does not exist, it downloads Miniconda into `env/conda` and creates `env`.
-- Existing PySide6, PyTorch, audio-separator, and ONNX Runtime installs are checked before downloading anything.
-
-Model pipeline:
+Example:
 
 ```python
 MODEL_PIPELINE = [
@@ -74,4 +31,107 @@ MODEL_PIPELINE = [
 ]
 ```
 
-Each step can override architecture parameters with `mdx_params`, `vr_params`, `demucs_params`, `mdxc_params`, and `separator_options`.
+Each step can override detailed separator settings with:
+
+- `mdx_params`
+- `vr_params`
+- `demucs_params`
+- `mdxc_params`
+- `separator_options`
+
+## Default Paths
+
+From `app/config/defaults.py`:
+
+- `ROOT_DIR`
+- `INPUTS_DIR`
+- `WORK_OUTPUTS_DIR`
+- `ARCHIVE_DIR`
+- `MODELS_DIR`
+
+## Preprocessing
+
+- `PREPROCESS_INPUTS`
+- `PREPROCESS_OUTPUT_FORMAT`
+- `PREPROCESS_WAV_CODEC`
+- `PREPROCESS_SAMPLE_RATE`
+- `PREPROCESS_CHANNELS`
+- `PREPROCESS_OVERWRITE`
+
+The separation workflow preprocesses source files into stable numbered WAV inputs before model steps.
+
+## Final Outputs
+
+- `FINAL_OUTPUT_PREFIX`
+- `FINAL_OUTPUT_TIME_FORMAT`
+- `FINAL_OUTPUT_GROUP_SUBDIRS`
+
+These control archive names and whether final files are grouped by input folder.
+
+## Dependency Setup
+
+- `USE_LOCAL_AUDIO_SEPARATOR_SOURCE`
+- `AUDIO_SEPARATOR_SOURCE_DIR`
+- `AUDIO_SEPARATOR_INSTALL_EXTRA`
+- `PYTORCH_CUDA_INDEX_URLS`
+- `AUTO_INSTALL_DEPENDENCIES`
+- `VERIFY_RELATED_MODEL_FILES`
+
+`run-install.bat` is still the preferred full environment setup path.
+
+## Runtime
+
+- `AUDIO_EXTENSIONS`
+- `RECURSIVE_INPUT_SCAN`
+- `STOP_ON_ERROR`
+- `CLEAN_WORK_OUTPUTS_BEFORE_RUN`
+- `CLEAN_WORK_OUTPUTS_AFTER_SUCCESS`
+- `LOG_LEVEL`
+
+## Separator Defaults
+
+Common separator options:
+
+- `output_format`
+- `output_bitrate`
+- `normalization_threshold`
+- `amplification_threshold`
+- `invert_using_spec`
+- `sample_rate`
+- `use_soundfile`
+- `use_autocast`
+- `chunk_duration`
+- `output_single_stem`
+
+Architecture defaults:
+
+- `DEFAULT_MDX_PARAMS`
+- `DEFAULT_VR_PARAMS`
+- `DEFAULT_DEMUCS_PARAMS`
+- `DEFAULT_MDXC_PARAMS`
+
+## GUI-Generated Config
+
+The Separate GUI page writes:
+
+```text
+user_data/gui_separate_config.py
+```
+
+That generated config imports uppercase values from root `config.py`, then overrides common model settings and `MODEL_PIPELINE` from the GUI controls.
+
+Do not edit `user_data/gui_separate_config.py` by hand; it is generated before GUI separation runs.
+
+## Tool Settings
+
+Tool settings currently live in widget state, not persistent config.
+
+Defaults:
+
+- audio quality segment length: 10 minutes
+- duration input folder: `inputs`
+- pitch input folder: `inputs`
+- pitch algorithm: `Praat`
+- normalize input folder: `inputs`
+- normalize output folder: `outputs`
+- normalize target peak: `-3.0 dB`

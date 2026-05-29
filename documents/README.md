@@ -1,9 +1,40 @@
-# Developer Documents
+# AI-Cover Developer Documents
 
-This folder describes AI-Cover from the developer point of view.
+This folder is the source of truth for the current project structure and behavior.
 
-- [Architecture](architecture.md): package layout, module boundaries, and dependency rules.
-- [GUI](gui.md): PySide6 desktop application structure and design direction.
-- [Separate Module](separate.md): current executable audio separation workflow.
-- [Slicer Module](slicer.md): audio slicing workflow and GUI controls.
-- [Configuration](configuration.md): runtime configuration reference.
+## Map
+
+- [Architecture](architecture.md): package boundaries, data flow, and ownership rules.
+- [Environment](environment.md): local `env`, installer behavior, and dependency groups.
+- [GUI](gui.md): desktop shell, pages, widgets, threading, and i18n.
+- [Separate](separate.md): separation CLI and GUI model pipeline.
+- [Slicer](slicer.md): training-clip slicing workflow.
+- [Tools](tools.md): audio quality, duration, pitch, and normalize utilities.
+- [Configuration](configuration.md): config loading, defaults, and pipeline keys.
+- [Development](development.md): implementation conventions and verification checklist.
+
+## Current State
+
+Implemented pages:
+
+- Separate
+- Slicer
+- Tools
+- Settings
+
+Placeholder pages:
+
+- Home
+- Train
+- Inference
+- About
+
+Main runnable entry points:
+
+```bat
+run-install.bat
+run.bat
+run-gui.bat
+```
+
+The GUI should call workflow modules. Audio processing should stay outside `app/gui`.
