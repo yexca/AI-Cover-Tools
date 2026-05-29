@@ -74,6 +74,7 @@ class PitchFileSummary:
 
 @dataclass(frozen=True)
 class PitchReport:
+    algorithm: str
     directory: Path
     file_count: int
     failed_count: int
@@ -88,6 +89,7 @@ class PitchReport:
 
     def to_text(self) -> str:
         lines = [
+            f"Algorithm: {self.algorithm}",
             f"Files scanned: {self.file_count}",
             f"Failed files: {self.failed_count}",
             f"Voiced frames: {self.voiced_frames}",
@@ -236,42 +238,27 @@ def normalize_audio_directory(input_dir: Path, output_dir: Path, target_peak_db:
     )
 
 
-def analyze_dataset_pitch(directory: Path, output_root: Path, outlier_percentile: float = 1.0) -> PitchReport:
-    try:
-        import parselmouth
-    except ImportError as exc:
-        raise RuntimeError("praat-parselmouth is not installed. Please run run-install.bat again.") from exc
-
+def analyze_dataset_pitch(
+    directory: Path,
+    output_root: Path,
+    outlier_percentile: float = 1.0,
+    algorithm: str = "praat",
+) -> PitchReport:
     directory = directory.expanduser().resolve()
     files = iter_audio_files(directory)
-    all_pitch_frames: list[np.ndarray] = []
-    summaries: list[PitchFileSummary] = []
-    failed_count = 0
-
-    for path in files:
-        try:
-            sound = parselmouth.Sound(str(path))
-            pitch = sound.to_pitch()
-            pitch_values = pitch.selected_array["frequency"]
-            voiced_frames = pitch_values[pitch_values > 0]
-            if len(voiced_frames) == 0:
-                summaries.append(PitchFileSummary(path.name, 0, None, None))
-                continue
-            all_pitch_frames.append(voiced_frames)
-            summaries.append(
-                PitchFileSummary(
-                    file_name=path.name,
-                    voiced_frames=int(len(voiced_frames)),
-                    minimum_hz=float(np.min(voiced_frames)),
-                    maximum_hz=float(np.max(voiced_frames)),
-                )
-            )
-        except Exception as exc:
-            failed_count += 1
-            summaries.append(PitchFileSummary(path.name, 0, None, None, f"{type(exc).__name__}: {exc}"))
+    algorithm_key = algorithm.lower().strip()
+    if algorithm_key == "praat":
+        all_pitch_frames, summaries, failed_count = _extract_praat_pitch(files)
+        algorithm_label = "Praat"
+    elif algorithm_key == "rmvpe":
+        all_pitch_frames, summaries, failed_count = _extract_rmvpe_pitch(files)
+        algorithm_label = "RMVPE"
+    else:
+        raise ValueError(f"Unknown pitch algorithm: {algorithm}")
 
     if not all_pitch_frames:
         return PitchReport(
+            algorithm=algorithm_label,
             directory=directory,
             file_count=len(files),
             failed_count=failed_count,
@@ -290,9 +277,13 @@ def analyze_dataset_pitch(directory: Path, output_root: Path, outlier_percentile
     absolute_max_hz = float(np.max(pitch_frames))
     effective_min_hz = float(np.percentile(pitch_frames, outlier_percentile))
     effective_max_hz = float(np.percentile(pitch_frames, 100.0 - outlier_percentile))
-    counts, bin_edges = np.histogram(pitch_frames, bins=50)
-    peak_index = int(np.argmax(counts))
-    primary_peak_hz = float((bin_edges[peak_index] + bin_edges[peak_index + 1]) / 2)
+    pitch_span_hz = absolute_max_hz - absolute_min_hz
+    if pitch_span_hz < 1e-3:
+        primary_peak_hz = float(np.mean(pitch_frames))
+    else:
+        counts, bin_edges = np.histogram(pitch_frames, bins=min(50, max(1, len(pitch_frames))))
+        peak_index = int(np.argmax(counts))
+        primary_peak_hz = float((bin_edges[peak_index] + bin_edges[peak_index + 1]) / 2)
 
     plot_dir = output_root.expanduser().resolve() / "pitch"
     plot_dir.mkdir(parents=True, exist_ok=True)
@@ -300,6 +291,7 @@ def analyze_dataset_pitch(directory: Path, output_root: Path, outlier_percentile
     _render_pitch_distribution(pitch_frames, effective_min_hz, effective_max_hz, plot_path)
 
     return PitchReport(
+        algorithm=algorithm_label,
         directory=directory,
         file_count=len(files),
         failed_count=failed_count,
@@ -311,6 +303,91 @@ def analyze_dataset_pitch(directory: Path, output_root: Path, outlier_percentile
         effective_max_hz=effective_max_hz,
         plot_path=plot_path,
         files=summaries,
+    )
+
+
+def _extract_praat_pitch(files: list[Path]) -> tuple[list[np.ndarray], list[PitchFileSummary], int]:
+    try:
+        import parselmouth
+    except ImportError as exc:
+        raise RuntimeError("praat-parselmouth is not installed. Please run run-install.bat again.") from exc
+
+    all_pitch_frames: list[np.ndarray] = []
+    summaries: list[PitchFileSummary] = []
+    failed_count = 0
+
+    for path in files:
+        try:
+            sound = parselmouth.Sound(str(path))
+            pitch = sound.to_pitch()
+            pitch_values = pitch.selected_array["frequency"]
+            voiced_frames = pitch_values[pitch_values > 0]
+            _append_pitch_summary(path, voiced_frames, all_pitch_frames, summaries)
+        except Exception as exc:
+            failed_count += 1
+            summaries.append(PitchFileSummary(path.name, 0, None, None, f"{type(exc).__name__}: {exc}"))
+
+    return all_pitch_frames, summaries, failed_count
+
+
+def _extract_rmvpe_pitch(files: list[Path], confidence_threshold: float = 0.03) -> tuple[list[np.ndarray], list[PitchFileSummary], int]:
+    try:
+        from rmvpe_onnx import RMVPE
+    except ImportError as exc:
+        raise RuntimeError("rmvpe-onnx is not installed. Please run run-install.bat again.") from exc
+
+    try:
+        estimator = RMVPE()
+    except Exception as exc:
+        raise RuntimeError(f"RMVPE model could not be loaded: {exc}") from exc
+
+    all_pitch_frames: list[np.ndarray] = []
+    summaries: list[PitchFileSummary] = []
+    failed_count = 0
+
+    for path in files:
+        try:
+            audio, sample_rate = soundfile.read(path, dtype="float32", always_2d=False)
+            frequency = _predict_rmvpe_frequency(estimator, audio, sample_rate, confidence_threshold)
+            voiced_frames = frequency[frequency > 0]
+            _append_pitch_summary(path, voiced_frames, all_pitch_frames, summaries)
+        except Exception as exc:
+            failed_count += 1
+            summaries.append(PitchFileSummary(path.name, 0, None, None, f"{type(exc).__name__}: {exc}"))
+
+    return all_pitch_frames, summaries, failed_count
+
+
+def _predict_rmvpe_frequency(
+    estimator,  # noqa: ANN001
+    audio: np.ndarray,
+    sample_rate: int,
+    confidence_threshold: float,
+) -> np.ndarray:
+    _time, frequency, confidence, _activation = estimator.predict(audio, sample_rate)
+    frequency = np.asarray(frequency, dtype=np.float32)
+    confidence = np.asarray(confidence, dtype=np.float32)
+    return np.where(confidence >= confidence_threshold, frequency, 0.0)
+
+
+def _append_pitch_summary(
+    path: Path,
+    voiced_frames: np.ndarray,
+    all_pitch_frames: list[np.ndarray],
+    summaries: list[PitchFileSummary],
+) -> None:
+    voiced_frames = np.asarray(voiced_frames, dtype=np.float32)
+    if len(voiced_frames) == 0:
+        summaries.append(PitchFileSummary(path.name, 0, None, None))
+        return
+    all_pitch_frames.append(voiced_frames)
+    summaries.append(
+        PitchFileSummary(
+            file_name=path.name,
+            voiced_frames=int(len(voiced_frames)),
+            minimum_hz=float(np.min(voiced_frames)),
+            maximum_hz=float(np.max(voiced_frames)),
+        )
     )
 
 
@@ -485,6 +562,8 @@ def _render_pitch_distribution(
     plot_box = (left, top, width - right, height - bottom)
     draw.rectangle(plot_box, fill=(8, 11, 17), outline=(70, 78, 94))
 
+    if float(np.max(pitch_frames) - np.min(pitch_frames)) < 1e-3:
+        pitch_frames = pitch_frames + np.linspace(-0.5, 0.5, len(pitch_frames), dtype=np.float32)
     counts, edges = np.histogram(pitch_frames, bins=100, density=True)
     max_count = float(np.max(counts)) if counts.size else 1.0
     for index, count in enumerate(counts):

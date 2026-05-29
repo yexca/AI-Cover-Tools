@@ -152,11 +152,13 @@ exit /b 0
 
 :ensure_tools_dependencies
 echo Checking tools dependencies...
-"%PYTHON_CMD%" -c "import ffmpeg_normalize, PIL, parselmouth, scipy; print('Tools dependencies already available')"
+"%PYTHON_CMD%" -c "import ffmpeg_normalize, PIL, parselmouth, rmvpe_onnx, scipy; print('Tools dependencies already available')"
 if not errorlevel 1 exit /b 0
 
 echo Installing tools dependencies...
-"%PYTHON_CMD%" -m pip install ffmpeg-normalize Pillow praat-parselmouth scipy
+"%PYTHON_CMD%" -m pip install ffmpeg-normalize Pillow praat-parselmouth scipy huggingface-hub librosa
+if errorlevel 1 exit /b 1
+"%PYTHON_CMD%" -m pip install --no-deps rmvpe-onnx
 exit /b %errorlevel%
 
 :error

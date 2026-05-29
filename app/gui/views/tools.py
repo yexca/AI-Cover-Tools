@@ -6,6 +6,7 @@ from PySide6.QtCore import QObject, QThread, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, QPixmap, QResizeEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QComboBox,
     QDialog,
     QFileDialog,
     QFrame,
@@ -101,12 +102,14 @@ class ToolWorker(QObject):
         path: Path,
         output_path: Path | None = None,
         target_peak_db: float = -3.0,
+        pitch_algorithm: str = "praat",
     ) -> None:
         super().__init__()
         self._mode = mode
         self._path = path
         self._output_path = output_path
         self._target_peak_db = target_peak_db
+        self._pitch_algorithm = pitch_algorithm
 
     @Slot()
     def run(self) -> None:
@@ -116,7 +119,7 @@ class ToolWorker(QObject):
             elif self._mode == "duration":
                 result = calculate_total_duration(self._path)
             elif self._mode == "pitch":
-                result = analyze_dataset_pitch(self._path, PROJECT_ROOT / "outputs")
+                result = analyze_dataset_pitch(self._path, PROJECT_ROOT / "outputs", algorithm=self._pitch_algorithm)
             elif self._mode == "normalize":
                 if self._output_path is None:
                     raise ValueError("output_path")
@@ -234,6 +237,7 @@ class ToolsPage(QWidget):
         self._pitch_input_title.setText(translator.text("tools.input"))
         self._pitch_output_title.setText(translator.text("tools.output"))
         self._pitch_folder_label.setText(translator.text("tools.folder"))
+        self._pitch_algorithm_label.setText(translator.text("tools.pitch.algorithm"))
         self._pitch_choose.setText(translator.text("settings.choose"))
         self._pitch_run.setText(translator.text("tools.analyze"))
         self._pitch_drop_area.set_text(translator.text("tools.drop_folder"))
@@ -411,6 +415,10 @@ class ToolsPage(QWidget):
         self._pitch_input_title.setObjectName("CardTitle")
         self._pitch_folder_label = QLabel()
         self._pitch_path = QLineEdit(str(PROJECT_ROOT / "inputs"))
+        self._pitch_algorithm_label = QLabel()
+        self._pitch_algorithm = QComboBox()
+        self._pitch_algorithm.addItem("Praat", "praat")
+        self._pitch_algorithm.addItem("RMVPE", "rmvpe")
         self._pitch_choose = QPushButton()
         self._pitch_choose.setObjectName("GlassButton")
         self._pitch_choose.clicked.connect(lambda: self._choose_folder(self._pitch_path))
@@ -424,6 +432,8 @@ class ToolsPage(QWidget):
         input_layout.addWidget(self._pitch_path, 1, 1)
         input_layout.addWidget(self._pitch_choose, 1, 2)
         input_layout.addWidget(self._pitch_drop_area, 2, 0, 1, 3)
+        input_layout.addWidget(self._pitch_algorithm_label, 3, 0)
+        input_layout.addWidget(self._pitch_algorithm, 3, 1)
         input_layout.addWidget(self._pitch_run, 3, 2)
         input_layout.setColumnStretch(1, 1)
         layout.addWidget(input_card)
@@ -557,7 +567,7 @@ class ToolsPage(QWidget):
         self._start_worker("duration", Path(self._duration_path.text()))
 
     def _start_pitch(self) -> None:
-        self._start_worker("pitch", Path(self._pitch_path.text()))
+        self._start_worker("pitch", Path(self._pitch_path.text()), pitch_algorithm=str(self._pitch_algorithm.currentData()))
 
     def _start_normalize(self) -> None:
         self._start_worker(
@@ -573,6 +583,7 @@ class ToolsPage(QWidget):
         path: Path,
         output_path: Path | None = None,
         target_peak_db: float = -3.0,
+        pitch_algorithm: str = "praat",
     ) -> None:
         if self._thread is not None:
             return
@@ -585,7 +596,7 @@ class ToolsPage(QWidget):
         self._set_buttons_enabled(False)
         self._set_message(self._translator.text(f"tools.{mode}.running"))
         self._thread = QThread(self)
-        self._worker = ToolWorker(mode, path, output_path, target_peak_db)
+        self._worker = ToolWorker(mode, path, output_path, target_peak_db, pitch_algorithm)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.finished.connect(self._handle_finished)

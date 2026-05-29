@@ -8,5 +8,6 @@ numpy
 ffmpeg-normalize
 Pillow
 praat-parselmouth
+rmvpe-onnx
 scipy
 soundfile==0.13.1
