@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 
 env/
+user_data/
 models/
 outputs/
 outputs-*/

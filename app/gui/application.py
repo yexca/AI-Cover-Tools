@@ -13,12 +13,16 @@ from .main_window import MainWindow
 
 
 def run_gui() -> int:
+    print("Starting AI-Cover GUI...", flush=True)
     app = QApplication(sys.argv)
     app.setApplicationName("AI-Cover")
     app.setOrganizationName("AI-Cover")
 
     translator = Translator.from_system_locale()
     window = MainWindow(translator)
+    window.statusBar().messageChanged.connect(lambda message: print(message, flush=True) if message else None)
     window.show()
 
-    return app.exec()
+    exit_code = app.exec()
+    print(f"AI-Cover GUI exited with code {exit_code}.", flush=True)
+    return exit_code

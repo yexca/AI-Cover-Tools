@@ -10,7 +10,6 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QMainWindow, QStackedWidget, 
 
 from .appearance import AppearanceSettings
 from .i18n import Translator
-from .paths import BACKGROUND_IMAGE
 from .style import build_style
 from .views import PlaceholderPage, SeparatePage, SettingsPage, SlicerPage
 from .widgets import BackgroundWidget, BlurLayer, NavigationItem, NavigationRail, TintLayer
@@ -53,7 +52,7 @@ class MainWindow(QMainWindow):
         root_layout.addLayout(main_layout, 1)
 
         self._nav = NavigationRail(self._navigation_items(), translator)
-        self._nav.set_expanded(True)
+        self._nav.set_expanded(False)
         self._nav.set_locale(translator.locale_name)
         self._nav.page_selected.connect(self._show_page)
         self._nav.language_changed.connect(self._change_language)
@@ -90,17 +89,19 @@ class MainWindow(QMainWindow):
             NavigationItem("slicer", "nav.slicer", "slicer"),
             NavigationItem("train", "nav.train", "train"),
             NavigationItem("inference", "nav.inference", "inference"),
+            NavigationItem("tools", "nav.tools", "tools"),
             NavigationItem("settings", "nav.settings", "settings"),
             NavigationItem("about", "nav.about", "about"),
         ]
 
     def _add_pages(self) -> None:
-        for key in ("home", "train", "inference", "about"):
+        for key in ("home", "train", "inference", "tools", "about"):
             page = PlaceholderPage(f"page.{key}.title", f"page.{key}.body", self._translator)
             self._page_widgets.append(page)
             self._pages[key] = self._stack.addWidget(page)
 
         separate_page = SeparatePage(self._translator)
+        separate_page.status_changed.connect(self.statusBar().showMessage)
         self._page_widgets.append(separate_page)
         self._pages["separate"] = self._stack.addWidget(separate_page)
 
