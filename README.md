@@ -1,84 +1,148 @@
-# AI-Cover
+# AI Cover Tools
 
-AI-Cover is a local batch pipeline for preparing AI cover training data. It reads audio from `inputs`, converts every source file into clean numbered WAV files, then runs the configured `audio-separator` model chain. User input files are never modified.
+Languages: [English](README.md) | [简体中文](README.zh-cn.md) | [日本語](README.ja.md)
 
-The target architecture follows the AI cover workflow:
+AI Cover Tools is a Windows toolkit for preparing local AI cover audio materials. It currently focuses on the pre-training audio workflow: vocal extraction, training-clip slicing, audio quality checks, total duration analysis, pitch analysis, and peak normalization.
 
-```text
-separate -> slicer -> train -> inference
-```
+Currently available features:
 
-The current executable modules are `separate` and `slicer`, implemented under `app/separate` and `app/slicer`. Training and inference code has dedicated packages under `app/train` and `app/inference`.
+- GUI: Separate, Slicer, Tools, Settings, and About.
+- Separate: batch process audio with `python-audio-separator` and a configurable model chain to remove accompaniment, harmony, reverb, noise, or keep selected stems.
+- Slicer: split audio into training-friendly clips according to silence and duration settings.
+- Tools: spectrogram-based audio quality checks, folder duration summary, pitch report, and peak normalization.
 
-## Install
+Train and Inference pages are already reserved in the GUI, but they are placeholders for now. For voice model training and final cover inference, mature external tools such as Applio are recommended at this stage.
+
+## Quick Start
+
+Run the installer first:
 
 ```bat
 run-install.bat
 ```
 
-The installer only manages the project-local `env`. If `env` is missing, it downloads Miniconda into `env/conda` and creates the environment. Existing dependencies inside `env` are skipped when they are already usable.
+The installer creates or reuses the project-local `env` environment and installs GUI, PyTorch, FFmpeg, audio separation, and tool dependencies. Normal usage does not rely on system Python.
 
-## Run CLI
-
-Put audio files into subfolders under `inputs`, for example:
-
-```text
-inputs/
-  Kano/
-    song.wav
-  nameless/
-    song.mp3
-```
-
-Then run:
-
-```bat
-run.bat
-```
-
-Useful commands:
-
-```bat
-run.bat --dry-run
-run.bat --preprocess-only
-run.bat --download-models-only
-```
-
-## Run GUI
+After installation, start the GUI:
 
 ```bat
 run-gui.bat
 ```
 
-The GUI includes the Slicer page. It defaults to `inputs` as the input folder, `outputs` as the output folder, and `wav` as the output format.
+If you only want to run the command-line separation workflow:
 
-GUI image assets live under `img`:
-
-- `img/background.png`: default desktop background image
-- `img/icon.png`: application, window, and custom title-bar icon
-
-## Output
-
-During a run, temporary work is written to `outputs`. When the run finishes, the whole folder is moved to:
-
-```text
-archives/outputs-YYYYmmdd-HHMMSS/
+```bat
+run.bat
 ```
 
-Inside the archived run you will find:
+## Recommended Flow
 
-- `<group>-inputs1`: renamed/converted WAV inputs such as `01.wav`
-- `<group>-outputs<step>-<label>`: raw model outputs for each step
-- `<group>-inputs<next>`: target stems moved forward to the next step
-- `<group>-end`: final WAV files for that input group
-- `<group>-rename-map.md`: Markdown table mapping original filenames to normalized WAV names
-- `manifest.json` and the run log
+1. Put source songs or vocal materials into `inputs`.
+2. Use the GUI Separate page to extract cleaner vocals.
+3. Use the Tools page to check audio quality, total duration, pitch range, and normalize files when needed.
+4. Use the Slicer page to generate short training clips.
+5. Train and run inference with an external voice model tool.
 
-## Common Config
+## GUI Features
 
-Edit `config.py`.
+### Separate
 
-The most commonly changed section is `MODEL_PIPELINE`:
+The Separate page edits and runs an ordered model processing chain. You can add multiple model modules and configure:
+
+- model filename
+- stem to keep
+- stem aliases
+- pitch shift
+- common settings such as batch size, overlap, and segment size
+
+The GUI writes its settings to `user_data/gui_separate_config.py`, then calls the same command-line separation workflow. Separation output is first written to `outputs`, then archived to `archives/outputs-YYYYmmdd-HHMMSS` after a successful run.
+
+### Slicer
+
+The Slicer page recursively scans an input folder and splits audio into training-friendly clips. The default input is `inputs`, the default output is `outputs`, and the default output format is `wav`.
+
+Common settings:
+
+- Threshold: silence threshold
+- Minimum Length: shortest clip length
+- Minimum Interval: shortest silence interval
+- Hop Size: analysis step size
+- Maximum Size Length: maximum kept silence length
+
+Supported input formats include `wav`, `flac`, `mp3`, `m4a`, `ogg`, `opus`, `wma`, and `aiff`. Supported output formats are `wav`, `flac`, and `mp3`.
+
+### Tools
+
+The Tools page includes four standalone utilities:
+
+- Audio quality: generate Spek-like spectrogram images. Long audio is split into 10-minute segments.
+- Total duration: summarize the total duration of all supported audio files in a folder.
+- Pitch report: analyze dataset pitch range and distribution with Praat or RMVPE.
+- Normalize: batch peak-normalize audio while preserving the original folder structure.
+
+Tool outputs are written to the selected output path, or to tool-specific folders under `outputs`.
+
+### Settings
+
+The Settings page currently provides live appearance previews such as background image, blur, text color, and background tint. These settings are preview-only in the current implementation and are not persisted yet.
+
+## Command-Line Separation
+
+The command-line separation workflow expects first-level grouped folders under `inputs`:
+
+```text
+inputs/
+  SingerA/
+    song-a.wav
+    song-b.mp3
+  SingerB/
+    take-001.flac
+```
+
+Each first-level folder is treated as one group. Source files are never modified. The workflow first copies or converts them into stable numbered WAV files, then runs the configured model chain.
+
+Useful commands:
+
+```bat
+run.bat
+run.bat --dry-run
+run.bat --preprocess-only
+run.bat --download-models-only
+run.bat --skip-model-download
+```
+
+You can also specify a config file:
+
+```bat
+run.bat --config config.py
+```
+
+## Output Locations
+
+Common project folders:
+
+```text
+inputs/      source audio files
+outputs/     active run output, slicer output, and tool output
+archives/    archived separation runs
+models/      separation model cache
+user_data/   GUI presets and GUI-generated config
+img/         GUI icon and background image
+```
+
+A separation archive usually contains:
+
+- `<group>-inputs1`: preprocessed numbered WAV files.
+- `<group>-outputs<step>-<label>`: raw output from each model step.
+- `<group>-inputs<next>`: target stems passed to the next step.
+- `<group>-end`: final WAV files for that group.
+- `<group>-rename-map.md`: mapping between original filenames and numbered filenames.
+- `manifest.json`: run record.
+- `run-YYYYmmdd-HHMMSS.log`: run log.
+
+## Configure The Model Chain
+
+The command line reads `config.py` by default. The most commonly edited section is `MODEL_PIPELINE`:
 
 ```python
 MODEL_PIPELINE = [
@@ -87,19 +151,37 @@ MODEL_PIPELINE = [
         "model_filename": "mel_band_roformer_kim_ft3_unwa.ckpt",
         "keep_stem": "vocals",
         "stem_aliases": ["Vocals", "vocal"],
-        "segment_size": 256,
-        "override_model_segment_size": False,
-        "overlap": 2,
-        "batch_size": 16,
         "pitch_shift": 0,
     },
 ]
 ```
 
-- `label`: name used in output folders and filenames.
-- `model_filename`: exact model file to load or download.
-- `keep_stem`: model output stem to keep and pass to the next step.
-- `stem_aliases`: alternate names that may appear in model output.
-- `segment_size`, `overlap`, `batch_size`, `pitch_shift`: inference parameters.
+Field meanings:
 
-Full configuration, architecture notes, and GUI notes are in [documents/README.md](documents/README.md).
+- `label`: step name used in output folders and filenames.
+- `model_filename`: model file to load or download.
+- `keep_stem`: target stem to keep and pass to the next step.
+- `stem_aliases`: alternate stem names that may appear in model output.
+- `pitch_shift`: pitch shift for this step.
+
+Common global settings also live in `config.py`:
+
+```python
+MODEL_BATCH_SIZE = 16
+MODEL_OVERLAP = 2
+MODEL_SEGMENT_SIZE = 256
+MODEL_OVERRIDE_SEGMENT_SIZE = False
+```
+
+See [documents/configuration.md](documents/configuration.md) for the full configuration reference.
+
+## Notes
+
+- The first installation and first use of some models require network access.
+- CUDA PyTorch is installed first. If it fails, the installer falls back to available dependencies.
+- RMVPE pitch analysis downloads `rmvpe.onnx` on first use. If the network is unavailable, use Praat instead.
+- The separation workflow may clean or reuse `outputs` according to configuration. Treat archived results under `archives` as the important completed output.
+
+## Developer Documents
+
+Developer-facing documents are in [documents/README.md](documents/README.md). They cover architecture, environment setup, GUI, separation, slicer, tools, and configuration details.
