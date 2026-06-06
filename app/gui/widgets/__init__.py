@@ -4,6 +4,7 @@ from .background import BackgroundWidget
 from .glass import BlurLayer, TintLayer
 from .inputs import WheelDisabledDoubleSpinBox, WheelDisabledSpinBox
 from .navigation import NavigationButton, NavigationItem, NavigationRail
+from .window_chrome import WindowTitleBar
 
 __all__ = [
     "BackgroundWidget",
@@ -14,4 +15,5 @@ __all__ = [
     "TintLayer",
     "WheelDisabledDoubleSpinBox",
     "WheelDisabledSpinBox",
+    "WindowTitleBar",
 ]

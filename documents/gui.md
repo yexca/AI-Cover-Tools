@@ -10,7 +10,7 @@ app/gui/
   bootstrap.py          Windows DLL path setup for local env
   icons.py              SVG icon loading helpers
   main_window.py        shell, navigation, stacked pages, background
-  paths.py              project and asset paths
+  paths.py              project, image, and asset paths
   style.py              global Qt stylesheet
   appearance.py         live appearance settings dataclass
   assets/icons/         navigation and window chrome SVGs
@@ -18,6 +18,9 @@ app/gui/
   storage/              GUI persistence helpers
   views/                page widgets
   widgets/              reusable controls and shell widgets
+img/
+  background.png        default GUI background image
+  icon.png              application and title-bar icon
 ```
 
 ## Shell
@@ -25,9 +28,10 @@ app/gui/
 The main window is a WinUI-like desktop shell:
 
 - background image layer
+- application icon from `img/icon.png`
 - blur layer
 - tint layer
-- custom title bar when frameless window chrome is enabled
+- custom title bar with the app icon when frameless window chrome is enabled
 - left navigation rail
 - right content panel with a `QStackedWidget`
 - status bar for current task messages

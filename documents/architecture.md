@@ -20,6 +20,7 @@ app/
   inference/            placeholder workflow module
   utils/                shared small primitives
 documents/              developer documentation
+img/                    GUI background image and application icon
 inputs/                 user source audio
 models/                 model cache
 outputs/                active outputs and tool outputs

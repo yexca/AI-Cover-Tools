@@ -4,15 +4,16 @@ from .bootstrap import configure_windows_dll_paths
 
 configure_windows_dll_paths()
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPalette, QPixmap
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QColor, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QMainWindow, QStackedWidget, QVBoxLayout
 
 from .appearance import AppearanceSettings
 from .i18n import Translator
+from .paths import APP_ICON
 from .style import build_style
 from .views import PlaceholderPage, SeparatePage, SettingsPage, SlicerPage, ToolsPage
-from .widgets import BackgroundWidget, BlurLayer, NavigationItem, NavigationRail, TintLayer
+from .widgets import BackgroundWidget, BlurLayer, NavigationItem, NavigationRail, TintLayer, WindowTitleBar
 
 
 class MainWindow(QMainWindow):
@@ -24,10 +25,13 @@ class MainWindow(QMainWindow):
         self._appearance = AppearanceSettings()
 
         self.setWindowTitle(translator.text("app.title"))
+        if APP_ICON.exists():
+            self.setWindowIcon(QIcon(str(APP_ICON)))
         self.resize(1180, 760)
         self.setMinimumSize(900, 560)
         self.setAutoFillBackground(False)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setStyleSheet(build_style(self._appearance.text_color))
 
         palette = self.palette()
@@ -42,17 +46,27 @@ class MainWindow(QMainWindow):
         tint_color = QColor(self._appearance.tint_color)
         tint_color.setAlpha(self._appearance.tint_opacity)
         tint_layer = TintLayer(tint_color, parent=background)
+        blur_layer.stackUnder(tint_layer)
+        tint_layer.lower()
+        blur_layer.lower()
 
         root_layout = QVBoxLayout(background)
-        root_layout.setContentsMargins(16, 16, 16, 16)
-        root_layout.setSpacing(12)
+        root_layout.setContentsMargins(8, 8, 8, 8)
+        root_layout.setSpacing(8)
+
+        self._title_bar = WindowTitleBar(translator)
+        self._title_bar.minimize_requested.connect(self.showMinimized)
+        self._title_bar.maximize_requested.connect(self._toggle_maximized)
+        self._title_bar.close_requested.connect(self.close)
+        root_layout.addWidget(self._title_bar)
 
         main_layout = QHBoxLayout()
         main_layout.setSpacing(12)
+        main_layout.setContentsMargins(8, 0, 8, 8)
         root_layout.addLayout(main_layout, 1)
 
         self._nav = NavigationRail(self._navigation_items(), translator)
-        self._nav.set_expanded(False)
+        self._nav.set_expanded(True)
         self._nav.set_locale(translator.locale_name)
         self._nav.page_selected.connect(self._show_page)
         self._nav.language_changed.connect(self._change_language)
@@ -76,11 +90,18 @@ class MainWindow(QMainWindow):
         self._add_pages()
         self._show_page("home")
 
+    def changeEvent(self, event) -> None:  # noqa: ANN001
+        super().changeEvent(event)
+        if hasattr(self, "_title_bar") and event.type() == QEvent.Type.WindowStateChange:
+            self._title_bar.refresh_window_state(self.isMaximized())
+
     def resizeEvent(self, event) -> None:  # noqa: ANN001
         super().resizeEvent(event)
         if hasattr(self, "_blur_layer"):
             self._blur_layer.setGeometry(self._background.rect())
             self._tint_layer.setGeometry(self._background.rect())
+            self._tint_layer.lower()
+            self._blur_layer.lower()
 
     def _navigation_items(self) -> list[NavigationItem]:
         return [
@@ -135,10 +156,18 @@ class MainWindow(QMainWindow):
     def _change_language(self, locale_name: str) -> None:
         self._translator = Translator(locale_name)
         self.setWindowTitle(self._translator.text("app.title"))
+        self._title_bar.retranslate(self._translator)
         self._nav.retranslate(self._translator)
         for page in self._page_widgets:
             page.retranslate(self._translator)
         self.statusBar().showMessage(self._translator.text("status.ready"))
+
+    def _toggle_maximized(self) -> None:
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
+        self._title_bar.refresh_window_state(self.isMaximized())
 
     def _set_background_image(self, image_path) -> None:  # noqa: ANN001
         self._appearance.background_image = image_path

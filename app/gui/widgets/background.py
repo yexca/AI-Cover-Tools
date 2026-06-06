@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPainter, QPixmap
+from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
 
@@ -13,6 +13,7 @@ class BackgroundWidget(QWidget):
         self._image_path = image_path
         self._pixmap = QPixmap(str(image_path))
         self._overlay = QColor(5, 8, 14, 0)
+        self._border = QColor(255, 255, 255, 42)
 
     def set_image(self, image_path: Path) -> None:
         self._image_path = image_path
@@ -36,4 +37,6 @@ class BackgroundWidget(QWidget):
             y = (self.height() - scaled.height()) // 2
             painter.drawPixmap(x, y, scaled)
         painter.fillRect(self.rect(), self._overlay)
+        painter.setPen(QPen(self._border, 1))
+        painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
         super().paintEvent(event)

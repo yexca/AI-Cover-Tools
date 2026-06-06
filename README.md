@@ -52,6 +52,11 @@ run-gui.bat
 
 The GUI includes the Slicer page. It defaults to `inputs` as the input folder, `outputs` as the output folder, and `wav` as the output format.
 
+GUI image assets live under `img`:
+
+- `img/background.png`: default desktop background image
+- `img/icon.png`: application, window, and custom title-bar icon
+
 ## Output
 
 During a run, temporary work is written to `outputs`. When the run finishes, the whole folder is moved to:

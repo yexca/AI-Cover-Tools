@@ -9,6 +9,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "en": {
         "app.title": "AI-Cover",
         "app.subtitle": "Local AI cover workflow",
+        "window.close": "Close",
+        "window.maximize": "Maximize",
+        "window.minimize": "Minimize",
+        "window.restore": "Restore",
         "nav.about": "About",
         "nav.collapse": "Collapse",
         "nav.expand": "Expand",
@@ -135,6 +139,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "zh_CN": {
         "app.title": "AI 翻唱",
         "app.subtitle": "本地 AI 翻唱工作流",
+        "window.close": "关闭",
+        "window.maximize": "最大化",
+        "window.minimize": "最小化",
+        "window.restore": "还原",
         "nav.about": "关于",
         "nav.collapse": "折叠",
         "nav.expand": "展开",
@@ -261,6 +269,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "ja": {
         "app.title": "AI カバー",
         "app.subtitle": "ローカル AI カバーワークフロー",
+        "window.close": "閉じる",
+        "window.maximize": "最大化",
+        "window.minimize": "最小化",
+        "window.restore": "元に戻す",
         "nav.about": "情報",
         "nav.collapse": "折りたたむ",
         "nav.expand": "展開",

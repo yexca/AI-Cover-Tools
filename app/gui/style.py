@@ -9,15 +9,42 @@ QWidget {{
 }}
 
 #NavigationRail {{
-    background: rgba(255, 255, 255, 0.035);
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    border-radius: 10px;
+    background: rgba(10, 14, 22, 0.44);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 8px;
 }}
 
 #ContentPanel {{
-    background: rgba(255, 255, 255, 0.025);
-    border: 1px solid rgba(255, 255, 255, 0.13);
-    border-radius: 10px;
+    background: rgba(10, 14, 22, 0.40);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+}}
+
+#WindowTitleBar {{
+    background: rgba(10, 14, 22, 0.38);
+    border: 1px solid rgba(255, 255, 255, 0.17);
+    border-radius: 8px;
+}}
+
+#WindowTitle {{
+    color: rgba(247, 249, 252, 0.88);
+    font-size: 13px;
+    font-weight: 700;
+}}
+
+QToolButton#WindowChromeButton,
+QToolButton#WindowCloseButton {{
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+}}
+
+QToolButton#WindowChromeButton:hover {{
+    background: rgba(255, 255, 255, 0.12);
+}}
+
+QToolButton#WindowCloseButton:hover {{
+    background: rgba(210, 65, 82, 0.78);
 }}
 
 #SeparatePage,
@@ -69,8 +96,8 @@ QScrollArea#TransparentScrollArea {{
 }}
 
 #GlassCard {{
-    background: rgba(255, 255, 255, 0.035);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(10, 14, 22, 0.36);
+    border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 8px;
 }}
 
@@ -279,6 +306,10 @@ QScrollBar::sub-page:horizontal {{
 
 QStatusBar {{
     color: rgba(247, 249, 252, 0.70);
+    background: rgba(10, 14, 22, 0.34);
+    border: 0;
+    min-height: 20px;
+    max-height: 20px;
 }}
 """
 
