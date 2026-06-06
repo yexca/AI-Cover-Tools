@@ -12,7 +12,7 @@ from .appearance import AppearanceSettings
 from .i18n import Translator
 from .paths import APP_ICON
 from .style import build_style
-from .views import PlaceholderPage, SeparatePage, SettingsPage, SlicerPage, ToolsPage
+from .views import AboutPage, HomePage, PlaceholderPage, SeparatePage, SettingsPage, SlicerPage, ToolsPage
 from .widgets import BackgroundWidget, BlurLayer, NavigationItem, NavigationRail, TintLayer, WindowTitleBar
 
 
@@ -21,7 +21,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._translator = translator
         self._pages: dict[str, int] = {}
-        self._page_widgets: list[PlaceholderPage | SeparatePage | SettingsPage | SlicerPage | ToolsPage] = []
+        self._page_widgets: list[AboutPage | HomePage | PlaceholderPage | SeparatePage | SettingsPage | SlicerPage | ToolsPage] = []
         self._appearance = AppearanceSettings()
 
         self.setWindowTitle(translator.text("app.title"))
@@ -116,7 +116,12 @@ class MainWindow(QMainWindow):
         ]
 
     def _add_pages(self) -> None:
-        for key in ("home", "train", "inference", "about"):
+        home_page = HomePage(self._translator)
+        home_page.page_requested.connect(self._show_page)
+        self._page_widgets.append(home_page)
+        self._pages["home"] = self._stack.addWidget(home_page)
+
+        for key in ("train", "inference"):
             page = PlaceholderPage(f"page.{key}.title", f"page.{key}.body", self._translator)
             self._page_widgets.append(page)
             self._pages[key] = self._stack.addWidget(page)
@@ -145,6 +150,10 @@ class MainWindow(QMainWindow):
         self._settings_page = settings_page
         self._page_widgets.append(settings_page)
         self._pages["settings"] = self._stack.addWidget(settings_page)
+
+        about_page = AboutPage(self._translator)
+        self._page_widgets.append(about_page)
+        self._pages["about"] = self._stack.addWidget(about_page)
 
     def _show_page(self, key: str) -> None:
         index = self._pages.get(key)

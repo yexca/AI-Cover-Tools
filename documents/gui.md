@@ -47,9 +47,46 @@ The navigation rail includes:
 - Settings
 - About
 
-Home, Train, Inference, and About are currently placeholder pages.
+Train and Inference are currently placeholder pages.
 
 ## Implemented Pages
+
+### Home
+
+Card layout:
+
+- Introduction
+- Current scope
+- Recommended flow
+- Separate
+- Slicer
+- Tools
+- More information
+
+The page explains the current `AI Cover Tools` scope and avoids presenting Train or Inference as implemented features. Separate, Slicer, Tools, and About cards include navigation buttons that switch the `QStackedWidget` to the matching page. Card titles and button labels should match the navigation names for the active locale.
+
+### About
+
+Card layout:
+
+- Introduction
+- Development
+- Credits
+- Open-source dependencies
+
+The Introduction card includes one blog article row. The `Open` button changes target URL with the active locale:
+
+- `zh_CN`: `https://blog.yexca.net/archives/283/`
+- `en`: `https://blog.yexca.net/en/archives/283/`
+- `ja`: `https://blog.yexca.net/ja/archives/283/`
+
+Credits are for project inspiration and references:
+
+- Applio: dependency installation design inspiration
+- MSST-GUI: AI cover audio processing workflow inspiration
+- Spek: audio quality and spectrogram reference
+
+Open-source dependencies list runtime or direct project dependencies, including `python-audio-separator`, PySide6, FFmpeg, PyTorch, NumPy, SciPy, SoundFile, libsndfile, Pillow, Praat-Parselmouth, and ffmpeg-normalize.
 
 ### Separate
 

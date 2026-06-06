@@ -49,12 +49,17 @@ QToolButton#WindowCloseButton:hover {{
 
 #SeparatePage,
 #SeparateContent,
+#HomePage,
+#HomeContent,
+#AboutPage,
+#AboutContent,
 #SlicerPage,
 #SlicerContent,
 #ToolsPage,
 #ToolsContent,
 #SettingsPage,
 #SettingsContent,
+#TransparentFrame,
 QScrollArea#TransparentScrollArea,
 QScrollArea#TransparentScrollArea > QWidget {{
     background: transparent;
@@ -92,6 +97,23 @@ QScrollArea#TransparentScrollArea {{
 
 #CardTitle {{
     font-size: 16px;
+    font-weight: 700;
+}}
+
+#FlowStep,
+#FlowStepMuted {{
+    background: rgba(255, 255, 255, 0.055);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-weight: 700;
+}}
+
+#FlowStepMuted {{
+    color: rgba(247, 249, 252, 0.55);
+}}
+
+#LinkName {{
     font-weight: 700;
 }}
 

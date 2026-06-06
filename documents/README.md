@@ -1,4 +1,4 @@
-# AI-Cover Developer Documents
+# AI Cover Tools Developer Documents
 
 This folder is the source of truth for the current project structure and behavior.
 
@@ -17,17 +17,17 @@ This folder is the source of truth for the current project structure and behavio
 
 Implemented pages:
 
+- Home
 - Separate
 - Slicer
 - Tools
 - Settings
+- About
 
 Placeholder pages:
 
-- Home
 - Train
 - Inference
-- About
 
 Main runnable entry points:
 

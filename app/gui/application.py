@@ -15,10 +15,10 @@ from .paths import APP_ICON
 
 
 def run_gui() -> int:
-    print("Starting AI-Cover GUI...", flush=True)
+    print("Starting AI Cover Tools GUI...", flush=True)
     app = QApplication(sys.argv)
-    app.setApplicationName("AI-Cover")
-    app.setOrganizationName("AI-Cover")
+    app.setApplicationName("AI Cover Tools")
+    app.setOrganizationName("AI Cover Tools")
     if APP_ICON.exists():
         app.setWindowIcon(QIcon(str(APP_ICON)))
 
@@ -28,5 +28,5 @@ def run_gui() -> int:
     window.show()
 
     exit_code = app.exec()
-    print(f"AI-Cover GUI exited with code {exit_code}.", flush=True)
+    print(f"AI Cover Tools GUI exited with code {exit_code}.", flush=True)
     return exit_code
