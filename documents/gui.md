@@ -82,6 +82,7 @@ The Introduction card includes one blog article row. The `Open` button changes t
 
 Credits are for project inspiration and references:
 
+- shnva: default background image artist
 - Applio: dependency installation design inspiration
 - MSST-GUI: AI cover audio processing workflow inspiration
 - Spek: audio quality and spectrogram reference

@@ -16,6 +16,7 @@ BLOG_URLS = {
 AUTHOR_URL = "https://yexca.net"
 
 CREDIT_LINKS = (
+    ("about.credit.shnva", "about.credit.shnva.purpose", "https://www.pixiv.net/artworks/76371065"),
     ("about.credit.applio", "about.credit.applio.purpose", "https://github.com/IAHispano/Applio"),
     ("about.credit.msst_gui", "about.credit.msst_gui.purpose", "https://github.com/AliceNavigator/Music-Source-Separation-Training-GUI"),
     ("about.credit.spek", "about.credit.spek.purpose", "https://github.com/alexkay/spek"),
