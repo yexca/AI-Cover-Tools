@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>AudioFlow</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></div>
+      <div><strong>AudioFlow</strong><span>音频工作流</span></div>
+    </div>
+    <div class="workflow-name">
+      <span class="save-dot" title="已保存"></span>
+      <input id="workflowName" value="人声处理工作流" aria-label="工作流名称">
+    </div>
+    <nav class="top-actions" aria-label="工作流操作">
+      <button class="icon-button" id="newWorkflow" title="新建工作流"><span>＋</span></button>
+      <button class="text-button" id="loadWorkflow"><span class="button-icon">↥</span> 加载</button>
+      <button class="text-button" id="saveWorkflow"><span class="button-icon">↧</span> 保存</button>
+      <span class="divider"></span>
+      <button class="cancel-button hidden" id="cancelRun">取消</button>
+      <button class="run-button" id="runWorkflow"><span>▶</span> 运行工作流</button>
+    </nav>
+  </header>
+
+  <main class="app-shell">
+    <aside class="library-panel panel">
+      <div class="panel-title">
+        <div><span class="eyebrow">NODE LIBRARY</span><h1>节点库</h1></div>
+        <div class="refresh-wrap">
+          <button class="icon-button small" id="refreshToggle" title="刷新模型">↻</button>
+          <div class="refresh-menu hidden" id="refreshMenu">
+            <button data-scope="local"><b>扫描本地模型</b><span>快速，不访问网络</span></button>
+            <button data-scope="catalog"><b>同步在线目录</b><span>更新可下载模型信息</span></button>
+          </div>
+        </div>
+      </div>
+      <label class="search-box">
+        <span>⌕</span><input id="modelSearch" type="search" placeholder="搜索节点或模型…" autocomplete="off">
+      </label>
+      <div class="filter-row">
+        <label>架构</label>
+        <select id="architectureFilter"><option value="">全部架构</option></select>
+      </div>
+      <div class="library-scroll" id="nodeLibrary"></div>
+      <div class="library-footer"><span id="modelCount">正在读取模型…</span><span class="status-dot" id="apiStatus"></span></div>
+    </aside>
+
+    <section class="canvas-panel" id="canvasPanel">
+      <div class="canvas-toolbar">
+        <div class="crumb"><span>工作流</span><b>/</b><strong id="canvasTitle">人声处理工作流</strong></div>
+        <div class="canvas-tools">
+          <button id="undoButton" title="撤销 (Ctrl+Z)">↶</button>
+          <button id="redoButton" title="重做 (Ctrl+Shift+Z)">↷</button>
+          <span></span>
+          <button id="zoomOut" title="缩小">−</button>
+          <button class="zoom-label" id="zoomReset" title="重置视图">100%</button>
+          <button id="zoomIn" title="放大">＋</button>
+          <button id="fitView" title="适合画布">⌗</button>
+        </div>
+      </div>
+      <div class="canvas-viewport" id="viewport" tabindex="0">
+        <div class="canvas-grid"></div>
+        <div class="canvas-world" id="world">
+          <svg class="connections" id="connectionsSvg" viewBox="0 0 5000 3500" aria-hidden="true"></svg>
+          <div id="nodesLayer"></div>
+        </div>
+        <div class="connection-hint hidden" id="connectionHint">选择一个输入端口完成连接 · Esc 取消</div>
+        <div class="empty-canvas hidden" id="emptyCanvas">
+          <div class="empty-icon">⌁</div><b>从左侧添加第一个节点</b><span>拖拽节点到画布，或双击快速添加</span>
+        </div>
+        <div class="minimap" id="minimap"><canvas width="180" height="110"></canvas></div>
+        <div class="canvas-status"><span id="nodeCount">0 个节点</span><i></i><span id="edgeCount">0 条连接</span></div>
+      </div>
+    </section>
+
+    <aside class="inspector-panel panel">
+      <div class="panel-title inspector-title">
+        <div><span class="eyebrow">PROPERTIES</span><h1>属性</h1></div>
+        <button class="icon-button small" id="closeInspector" title="取消选择">×</button>
+      </div>
+      <div class="inspector-content" id="inspectorContent">
+        <div class="inspector-empty"><div>◇</div><b>未选择节点</b><span>选择画布中的节点来编辑参数</span></div>
+      </div>
+      <section class="activity-panel">
+        <button class="activity-header" id="activityToggle">
+          <span><i class="activity-state" id="activityState"></i><b>运行日志</b></span>
+          <span id="activityChevron">⌃</span>
+        </button>
+        <div class="run-progress hidden" id="runProgress"><span id="runProgressBar"></span></div>
+        <div class="activity-log" id="activityLog">
+          <div class="log-line muted"><time>--:--:--</time><span>准备就绪，等待运行。</span></div>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <div class="toast-stack" id="toastStack"></div>
+  <input class="hidden" id="workflowFile" type="file" accept="application/json,.json">
+  <script src="/app.js"></script>
+</body>
+</html>

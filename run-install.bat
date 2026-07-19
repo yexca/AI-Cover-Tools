@@ -30,6 +30,9 @@ if errorlevel 1 goto :error
 call :ensure_pyside
 if errorlevel 1 goto :error
 
+call :ensure_webui_dependencies
+if errorlevel 1 goto :error
+
 call :ensure_torch
 if errorlevel 1 goto :error
 
@@ -49,6 +52,7 @@ if errorlevel 1 goto :error
 echo Installation complete.
 echo Use run.bat to start the pipeline.
 echo Use run-gui.bat to start the GUI.
+echo Use run-webui.bat to start the WebUI.
 pause
 exit /b 0
 
@@ -92,6 +96,17 @@ if exist "%LOCAL_CONDA_BAT%" (
 "%PYTHON_CMD%" -m pip install --force-reinstall "PySide6==%PYSIDE_VERSION%" "PySide6_Addons==%PYSIDE_VERSION%" "PySide6_Essentials==%PYSIDE_VERSION%" "shiboken6==%PYSIDE_VERSION%"
 if errorlevel 1 exit /b 1
 "%PYTHON_CMD%" -c "from PySide6.QtWidgets import QApplication; import PySide6; print('PySide6 installed:', PySide6.__version__)"
+exit /b %errorlevel%
+
+:ensure_webui_dependencies
+echo Checking WebUI dependencies...
+"%PYTHON_CMD%" -c "import fastapi, uvicorn; print('WebUI dependencies already available:', fastapi.__version__, uvicorn.__version__)"
+if not errorlevel 1 exit /b 0
+
+echo Installing WebUI dependencies...
+"%PYTHON_CMD%" -m pip install "fastapi==0.116.1" "uvicorn[standard]==0.35.0"
+if errorlevel 1 exit /b 1
+"%PYTHON_CMD%" -c "import fastapi, uvicorn; print('WebUI dependencies installed:', fastapi.__version__, uvicorn.__version__)"
 exit /b %errorlevel%
 
 :ensure_torch

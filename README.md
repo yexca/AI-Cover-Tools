@@ -35,6 +35,20 @@ If you only want to run the command-line separation workflow:
 run.bat
 ```
 
+To start the node-based WebUI:
+
+```bat
+run-webui.bat
+```
+
+Then open `http://127.0.0.1:8188` in a browser. The launcher always uses the project-local `env` and prints a clear error if the environment has not been installed. Uvicorn options can be passed through, for example `run-webui.bat --port 8000`.
+
+## WebUI MVP
+
+The WebUI is an early ComfyUI-style audio workflow editor. Its initial node set includes single-file input, folder input, model-based audio processing, and folder output. Processing models are grouped by function in the left sidebar, with architecture available as a filter; model output ports are derived from the model registry metadata.
+
+On startup, the WebUI shows the saved registry immediately and starts a local-only background scan for installed model changes. This scan reads local filenames and metadata and does not download models or load them into GPU memory. Use **Refresh models** to trigger another local scan. Online catalog synchronization is a separate manual action so a slow or unavailable network cannot block startup. Models whose function or outputs cannot be identified remain marked for confirmation instead of being guessed silently.
+
 ## Recommended Flow
 
 1. Put source songs or vocal materials into `inputs`.
