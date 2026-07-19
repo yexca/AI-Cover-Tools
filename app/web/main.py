@@ -6,14 +6,15 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .executor import RunManager
+from .dialogs import DialogBusyError, DialogError, DialogRequest, is_loopback_client, pick_path
 from .model_registry import ModelRegistry
 from .paths import STATIC_DIR
 from .schemas import RefreshRequest, RunRequest, Workflow
-from .workflows import WorkflowStore, validate_workflow
+from .workflows import WorkflowStore, validate_workflow_detailed
 
 
 def create_app(
@@ -66,6 +67,40 @@ def create_app(
         except Exception as exc:
             raise HTTPException(status_code=502 if payload.scope != "local" else 500, detail=str(exc)) from exc
 
+    @app.post("/api/dialog/pick")
+    async def pick_local_path(payload: DialogRequest, request: Request) -> Any:
+        client_host = request.client.host if request.client else None
+        if not is_loopback_client(client_host):
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "path": None,
+                    "cancelled": False,
+                    "error": {"code": "loopback_required", "message": "Native path dialogs are only available to local clients."},
+                },
+            )
+        try:
+            return await asyncio.to_thread(pick_path, payload.kind, payload.initial_path, payload.locale)
+        except DialogBusyError as exc:
+            return JSONResponse(
+                status_code=409,
+                content={"path": None, "cancelled": False, "error": {"code": exc.code, "message": str(exc)}},
+            )
+        except DialogError as exc:
+            return JSONResponse(
+                status_code=400 if exc.code == "unsupported_audio_file" else 500,
+                content={"path": None, "cancelled": False, "error": {"code": exc.code, "message": str(exc)}},
+            )
+        except Exception as exc:
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "path": None,
+                    "cancelled": False,
+                    "error": {"code": "dialog_failed", "message": str(exc) or "Unable to open the native path dialog."},
+                },
+            )
+
     @app.get("/api/workflows")
     def list_workflows() -> dict[str, Any]:
         values = workflows.list()
@@ -95,8 +130,7 @@ def create_app(
 
     @app.post("/api/workflows/validate")
     def validate(workflow: Workflow) -> dict[str, Any]:
-        errors = validate_workflow(workflow, model_registry)
-        return {"valid": not errors, "errors": errors}
+        return validate_workflow_detailed(workflow, model_registry)
 
     @app.post("/api/runs", status_code=status.HTTP_202_ACCEPTED)
     def create_run(payload: RunRequest) -> dict[str, Any]:
@@ -105,9 +139,9 @@ def create_app(
             workflow = workflows.get(payload.workflow_id)
         if not workflow:
             raise HTTPException(status_code=400, detail="Provide workflow or workflow_id")
-        errors = validate_workflow(workflow, model_registry)
-        if errors:
-            raise HTTPException(status_code=422, detail={"message": "Workflow validation failed", "errors": errors})
+        validation = validate_workflow_detailed(workflow, model_registry)
+        if not validation["valid"]:
+            raise HTTPException(status_code=422, detail={"message": "Workflow validation failed", **validation})
         return runs.submit(workflow)
 
     @app.get("/api/runs/{run_id}")

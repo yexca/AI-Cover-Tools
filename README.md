@@ -47,6 +47,10 @@ Then open `http://127.0.0.1:8188` in a browser. The launcher always uses the pro
 
 The WebUI is an early ComfyUI-style audio workflow editor. Its initial node set includes single-file input, folder input, model-based audio processing, and folder output. Processing models are grouped by function in the left sidebar, with architecture available as a filter; model output ports are derived from the model registry metadata.
 
+Drag a library item onto the canvas, or double-click it to add a node. Select a node to edit it in the Properties panel. Path fields provide a **Browse** button that opens the native Windows file or folder picker on the machine running the WebUI. Create connections by dragging from either an output port to an input port or in the reverse direction; clicking two compatible ports remains available as a fallback. Before a run starts, the server checks required paths, model availability, ports, and graph structure, then highlights the affected nodes and connections.
+
+The interface follows the browser language by default and currently supports Simplified Chinese, Japanese, and English. The language selector in the top bar can override the browser setting and remembers the choice locally.
+
 On startup, the WebUI shows the saved registry immediately and starts a local-only background scan for installed model changes. This scan reads local filenames and metadata and does not download models or load them into GPU memory. Use **Refresh models** to trigger another local scan. Online catalog synchronization is a separate manual action so a slow or unavailable network cannot block startup. Models whose function or outputs cannot be identified remain marked for confirmation instead of being guessed silently.
 
 ## Recommended Flow

@@ -17,13 +17,11 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 from uuid import uuid4
 
+from .formats import AUDIO_EXTENSIONS
 from .model_registry import ModelRegistry
 from .paths import MODELS_DIR, RUNS_DIR, SEPARATOR_SOURCE_DIR
 from .schemas import Workflow
 from .workflows import topological_order
-
-
-AUDIO_EXTENSIONS = {".wav", ".flac", ".mp3", ".ogg", ".opus", ".m4a", ".aiff", ".aif", ".ac3"}
 
 
 def _now() -> str:

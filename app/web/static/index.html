@@ -1,66 +1,74 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>AudioFlow</title>
+  <title data-i18n="app.title">AudioFlow</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
       <div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></div>
-      <div><strong>AudioFlow</strong><span>音频工作流</span></div>
+      <div><strong>AudioFlow</strong><span data-i18n="app.subtitle">Audio workflow</span></div>
     </div>
     <div class="workflow-name">
-      <span class="save-dot" title="已保存"></span>
-      <input id="workflowName" value="人声处理工作流" aria-label="工作流名称">
+      <span class="save-dot" title="Saved" data-i18n-title="workflow.status.saved"></span>
+      <input id="workflowName" value="Vocal processing workflow" aria-label="Workflow name" data-i18n-aria-label="workflow.aria.name">
     </div>
-    <nav class="top-actions" aria-label="工作流操作">
-      <button class="icon-button" id="newWorkflow" title="新建工作流"><span>＋</span></button>
-      <button class="text-button" id="loadWorkflow"><span class="button-icon">↥</span> 加载</button>
-      <button class="text-button" id="saveWorkflow"><span class="button-icon">↧</span> 保存</button>
+    <nav class="top-actions" aria-label="Workflow actions" data-i18n-aria-label="workflow.aria.actions">
+      <label class="language-select" data-i18n-title="locale.label">
+        <select id="languageSelect" data-i18n-locale-select data-i18n-aria-label="locale.label" aria-label="Language">
+          <option value="system" data-i18n="locale.system">Follow browser</option>
+          <option value="zh-CN" data-i18n="locale.zhCN">Simplified Chinese</option>
+          <option value="ja" data-i18n="locale.ja">Japanese</option>
+          <option value="en" data-i18n="locale.en">English</option>
+        </select>
+      </label>
+      <button class="icon-button" id="newWorkflow" title="New workflow" data-i18n-title="workflow.action.new"><span>＋</span></button>
+      <button class="text-button" id="loadWorkflow"><span class="button-icon">↥</span> <span data-i18n="workflow.action.load">Load</span></button>
+      <button class="text-button" id="saveWorkflow"><span class="button-icon">↧</span> <span data-i18n="workflow.action.save">Save</span></button>
       <span class="divider"></span>
-      <button class="cancel-button hidden" id="cancelRun">取消</button>
-      <button class="run-button" id="runWorkflow"><span>▶</span> 运行工作流</button>
+      <button class="cancel-button hidden" id="cancelRun" data-i18n="workflow.action.cancel">Cancel</button>
+      <button class="run-button" id="runWorkflow"><span>▶</span> <span data-i18n="workflow.action.run">Run workflow</span></button>
     </nav>
   </header>
 
   <main class="app-shell">
     <aside class="library-panel panel">
       <div class="panel-title">
-        <div><span class="eyebrow">NODE LIBRARY</span><h1>节点库</h1></div>
+        <div><span class="eyebrow" data-i18n="library.eyebrow">NODE LIBRARY</span><h1 data-i18n="library.title">Node library</h1></div>
         <div class="refresh-wrap">
-          <button class="icon-button small" id="refreshToggle" title="刷新模型">↻</button>
+          <button class="icon-button small" id="refreshToggle" title="Refresh models" data-i18n-title="library.refresh.title">↻</button>
           <div class="refresh-menu hidden" id="refreshMenu">
-            <button data-scope="local"><b>扫描本地模型</b><span>快速，不访问网络</span></button>
-            <button data-scope="catalog"><b>同步在线目录</b><span>更新可下载模型信息</span></button>
+            <button data-scope="local"><b data-i18n="library.refresh.local.title">Scan local models</b><span data-i18n="library.refresh.local.description">Fast and does not access the network</span></button>
+            <button data-scope="catalog"><b data-i18n="library.refresh.catalog.title">Sync online catalog</b><span data-i18n="library.refresh.catalog.description">Update downloadable model information</span></button>
           </div>
         </div>
       </div>
       <label class="search-box">
-        <span>⌕</span><input id="modelSearch" type="search" placeholder="搜索节点或模型…" autocomplete="off">
+        <span>⌕</span><input id="modelSearch" type="search" placeholder="Search nodes or models…" data-i18n-placeholder="library.search.placeholder" autocomplete="off">
       </label>
       <div class="filter-row">
-        <label>架构</label>
-        <select id="architectureFilter"><option value="">全部架构</option></select>
+        <label data-i18n="library.filter.architecture">Architecture</label>
+        <select id="architectureFilter"><option value="" data-i18n="library.filter.allArchitectures">All architectures</option></select>
       </div>
       <div class="library-scroll" id="nodeLibrary"></div>
-      <div class="library-footer"><span id="modelCount">正在读取模型…</span><span class="status-dot" id="apiStatus"></span></div>
+      <div class="library-footer"><span id="modelCount" data-i18n="library.models.loading">Loading models…</span><span class="status-dot" id="apiStatus"></span></div>
     </aside>
 
     <section class="canvas-panel" id="canvasPanel">
       <div class="canvas-toolbar">
-        <div class="crumb"><span>工作流</span><b>/</b><strong id="canvasTitle">人声处理工作流</strong></div>
+        <div class="crumb"><span data-i18n="canvas.breadcrumb.workflow">Workflow</span><b>/</b><strong id="canvasTitle">Vocal processing workflow</strong></div>
         <div class="canvas-tools">
-          <button id="undoButton" title="撤销 (Ctrl+Z)">↶</button>
-          <button id="redoButton" title="重做 (Ctrl+Shift+Z)">↷</button>
+          <button id="undoButton" title="Undo (Ctrl+Z)" data-i18n-title="canvas.toolbar.undo">↶</button>
+          <button id="redoButton" title="Redo (Ctrl+Shift+Z)" data-i18n-title="canvas.toolbar.redo">↷</button>
           <span></span>
-          <button id="zoomOut" title="缩小">−</button>
-          <button class="zoom-label" id="zoomReset" title="重置视图">100%</button>
-          <button id="zoomIn" title="放大">＋</button>
-          <button id="fitView" title="适合画布">⌗</button>
+          <button id="zoomOut" title="Zoom out" data-i18n-title="canvas.toolbar.zoomOut">−</button>
+          <button class="zoom-label" id="zoomReset" title="Reset view" data-i18n-title="canvas.toolbar.resetView">100%</button>
+          <button id="zoomIn" title="Zoom in" data-i18n-title="canvas.toolbar.zoomIn">＋</button>
+          <button id="fitView" title="Fit view" data-i18n-title="canvas.toolbar.fitView">⌗</button>
         </div>
       </div>
       <div class="canvas-viewport" id="viewport" tabindex="0">
@@ -69,31 +77,31 @@
           <svg class="connections" id="connectionsSvg" viewBox="0 0 5000 3500" aria-hidden="true"></svg>
           <div id="nodesLayer"></div>
         </div>
-        <div class="connection-hint hidden" id="connectionHint">选择一个输入端口完成连接 · Esc 取消</div>
+        <div class="connection-hint hidden" id="connectionHint" data-i18n="canvas.connectionHint">Choose an input port to complete the connection · Esc to cancel</div>
         <div class="empty-canvas hidden" id="emptyCanvas">
-          <div class="empty-icon">⌁</div><b>从左侧添加第一个节点</b><span>拖拽节点到画布，或双击快速添加</span>
+          <div class="empty-icon">⌁</div><b data-i18n="canvas.empty.title">Add the first node from the left</b><span data-i18n="canvas.empty.description">Drag a node onto the canvas, or double-click to add it</span>
         </div>
         <div class="minimap" id="minimap"><canvas width="180" height="110"></canvas></div>
-        <div class="canvas-status"><span id="nodeCount">0 个节点</span><i></i><span id="edgeCount">0 条连接</span></div>
+        <div class="canvas-status"><span id="nodeCount">0 nodes</span><i></i><span id="edgeCount">0 connections</span></div>
       </div>
     </section>
 
     <aside class="inspector-panel panel">
       <div class="panel-title inspector-title">
-        <div><span class="eyebrow">PROPERTIES</span><h1>属性</h1></div>
-        <button class="icon-button small" id="closeInspector" title="取消选择">×</button>
+        <div><span class="eyebrow" data-i18n="inspector.eyebrow">PROPERTIES</span><h1 data-i18n="inspector.title">Properties</h1></div>
+        <button class="icon-button small" id="closeInspector" title="Clear selection" data-i18n-title="inspector.close">×</button>
       </div>
       <div class="inspector-content" id="inspectorContent">
-        <div class="inspector-empty"><div>◇</div><b>未选择节点</b><span>选择画布中的节点来编辑参数</span></div>
+        <div class="inspector-empty"><div>◇</div><b data-i18n="inspector.empty.title">No node selected</b><span data-i18n="inspector.empty.description">Select a node on the canvas to edit its parameters</span></div>
       </div>
       <section class="activity-panel">
         <button class="activity-header" id="activityToggle">
-          <span><i class="activity-state" id="activityState"></i><b>运行日志</b></span>
+          <span><i class="activity-state" id="activityState"></i><b data-i18n="activity.title">Run log</b></span>
           <span id="activityChevron">⌃</span>
         </button>
         <div class="run-progress hidden" id="runProgress"><span id="runProgressBar"></span></div>
         <div class="activity-log" id="activityLog">
-          <div class="log-line muted"><time>--:--:--</time><span>准备就绪，等待运行。</span></div>
+          <div class="log-line muted"><time>--:--:--</time><span data-i18n="activity.ready">Ready. Waiting to run.</span></div>
         </div>
       </section>
     </aside>
@@ -101,6 +109,10 @@
 
   <div class="toast-stack" id="toastStack"></div>
   <input class="hidden" id="workflowFile" type="file" accept="application/json,.json">
+  <script src="/i18n/locales/en.js"></script>
+  <script src="/i18n/locales/zh-CN.js"></script>
+  <script src="/i18n/locales/ja.js"></script>
+  <script src="/i18n/core.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

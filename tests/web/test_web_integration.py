@@ -145,6 +145,7 @@ class WorkflowContractTests(unittest.TestCase):
     def test_editor_payload_validates_and_legacy_config_is_flattened(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            (root / "song.wav").write_bytes(b"audio")
             payload = workflow_payload(root / "song.wav", root / "vocals", root / "instrumental")
             payload["nodes"][0] = {
                 "id": "input",
@@ -200,6 +201,7 @@ class ApiAndStaticTests(unittest.TestCase):
     def test_health_models_filters_static_assets_and_workflow_payload(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            (root / "song.wav").write_bytes(b"audio")
             registry = FixtureRegistry()
             manager = DummyRunManager()
             app = create_app(registry, WorkflowStore(root / "workflows.json"), manager)

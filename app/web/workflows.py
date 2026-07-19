@@ -8,6 +8,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
+from .formats import AUDIO_EXTENSIONS
 from .model_registry import ModelRegistry
 from .paths import WORKFLOWS_PATH
 from .schemas import Workflow, utc_now
@@ -73,66 +74,117 @@ class WorkflowStore:
         return existed
 
 
-def validate_workflow(workflow: Workflow, registry: ModelRegistry) -> list[str]:
+def validate_workflow_detailed(workflow: Workflow, registry: ModelRegistry) -> dict[str, Any]:
     errors: list[str] = []
+    global_errors: list[str] = []
+    node_errors: dict[str, list[str]] = defaultdict(list)
+    edge_errors: dict[str, list[str]] = defaultdict(list)
+
+    def add_global(message: str) -> None:
+        errors.append(message)
+        global_errors.append(message)
+
+    def add_node(node_id: str, message: str) -> None:
+        errors.append(message)
+        node_errors[node_id].append(message)
+
+    def add_edge(edge_id: str, message: str) -> None:
+        errors.append(message)
+        edge_errors[edge_id].append(message)
+
     node_by_id = {node.id: node for node in workflow.nodes}
     if len(node_by_id) != len(workflow.nodes):
-        errors.append("Node IDs must be unique")
+        add_global("Node IDs must be unique")
     if not workflow.nodes:
-        errors.append("Workflow has no nodes")
+        add_global("Workflow has no nodes")
     incoming: dict[str, list[str]] = defaultdict(list)
     outgoing: dict[str, list[str]] = defaultdict(list)
+    edge_ids = {edge.id for edge in workflow.edges}
+    if len(edge_ids) != len(workflow.edges):
+        add_global("Edge IDs must be unique")
     for edge in workflow.edges:
-        if edge.source not in node_by_id:
-            errors.append(f"Edge {edge.id} has an unknown source node: {edge.source}")
-            continue
-        if edge.target not in node_by_id:
-            errors.append(f"Edge {edge.id} has an unknown target node: {edge.target}")
+        source = node_by_id.get(edge.source)
+        target = node_by_id.get(edge.target)
+        if source is None:
+            add_edge(edge.id, f"Edge {edge.id} has an unknown source node: {edge.source}")
+        if target is None:
+            add_edge(edge.id, f"Edge {edge.id} has an unknown target node: {edge.target}")
+        if source is None or target is None:
             continue
         if edge.source == edge.target:
-            errors.append(f"Node {edge.source} cannot connect to itself")
+            add_edge(edge.id, f"Node {edge.source} cannot connect to itself")
         incoming[edge.target].append(edge.source)
         outgoing[edge.source].append(edge.target)
 
-        source_type = node_by_id[edge.source].type
-        target_type = node_by_id[edge.target].type
+        source_type = source.type
+        target_type = target.type
         if source_type == "output_folder":
-            errors.append(f"Output node {edge.source} cannot have outgoing edges")
+            add_edge(edge.id, f"Output node {edge.source} cannot have outgoing edges")
         if target_type in {"input_file", "input_folder"}:
-            errors.append(f"Input node {edge.target} cannot have incoming edges")
+            add_edge(edge.id, f"Input node {edge.target} cannot have incoming edges")
+        source_handle = edge.source_handle or "audio"
+        target_handle = edge.target_handle or "audio"
+        if source_type in {"input_file", "input_folder"} and source_handle != "audio":
+            add_edge(edge.id, f"Input node {edge.source} has no output port: {source_handle}")
+        if target_type in {"separator", "output_folder"} and target_handle != "audio":
+            add_edge(edge.id, f"Node {edge.target} has no input port: {target_handle}")
 
     for node in workflow.nodes:
         data = node.data
-        if node.type == "input_file" and not data.get("path"):
-            errors.append(f"Input file node {node.id} is missing path")
-        elif node.type == "input_folder" and not data.get("path"):
-            errors.append(f"Input folder node {node.id} is missing path")
+        if node.type == "input_file":
+            if not data.get("path"):
+                add_node(node.id, f"Input file node {node.id} is missing path")
+            else:
+                path = Path(str(data["path"])).expanduser()
+                if not path.exists():
+                    add_node(node.id, f"Input audio file does not exist: {path}")
+                elif not path.is_file():
+                    add_node(node.id, f"Input audio path is not a file: {path}")
+                elif path.suffix.lower() not in AUDIO_EXTENSIONS:
+                    add_node(node.id, f"Unsupported input audio extension: {path.suffix}")
+        elif node.type == "input_folder":
+            if not data.get("path"):
+                add_node(node.id, f"Input folder node {node.id} is missing path")
+            else:
+                path = Path(str(data["path"])).expanduser()
+                if not path.exists():
+                    add_node(node.id, f"Input folder does not exist: {path}")
+                elif not path.is_dir():
+                    add_node(node.id, f"Input folder path is not a directory: {path}")
         elif node.type == "separator":
             filename = data.get("model_filename") or data.get("model")
             if not filename:
-                errors.append(f"Separator node {node.id} is missing model_filename")
+                add_node(node.id, f"Separator node {node.id} is missing model_filename")
             else:
                 model = registry.find(str(filename))
                 if not model:
-                    errors.append(f"Separator node {node.id} uses an unknown model: {filename}")
+                    add_node(node.id, f"Separator node {node.id} uses an unknown model: {filename}")
                 elif not model.get("installed"):
-                    errors.append(f"Separator model is not installed: {filename}")
+                    add_node(node.id, f"Separator model is not installed: {filename}")
                 output_names = set(model.get("outputs") or []) if model else set()
+                if model and model.get("installed") and not output_names:
+                    add_node(node.id, f"Separator model output stems are unknown: {filename}")
                 for edge in workflow.edges:
-                    if edge.source == node.id and edge.source_handle and output_names and edge.source_handle not in output_names:
-                        errors.append(f"Separator node {node.id} has no output stem: {edge.source_handle}")
+                    if edge.source == node.id:
+                        source_handle = edge.source_handle or "audio"
+                        if output_names and source_handle not in output_names:
+                            add_edge(edge.id, f"Separator node {node.id} has no output stem: {source_handle}")
             if not incoming[node.id]:
-                errors.append(f"Separator node {node.id} has no audio input")
+                add_node(node.id, f"Separator node {node.id} has no audio input")
         elif node.type == "output_folder":
             if not data.get("path"):
-                errors.append(f"Output node {node.id} is missing path")
+                add_node(node.id, f"Output node {node.id} is missing path")
+            else:
+                path = Path(str(data["path"])).expanduser()
+                if path.exists() and not path.is_dir():
+                    add_node(node.id, f"Output path is not a directory: {path}")
             if not incoming[node.id]:
-                errors.append(f"Output node {node.id} has no audio input")
+                add_node(node.id, f"Output node {node.id} has no audio input")
 
     if not any(node.type in {"input_file", "input_folder"} for node in workflow.nodes):
-        errors.append("Workflow needs at least one input node")
+        add_global("Workflow needs at least one input node")
     if not any(node.type == "output_folder" for node in workflow.nodes):
-        errors.append("Workflow needs at least one output node")
+        add_global("Workflow needs at least one output node")
 
     indegree = {node.id: 0 for node in workflow.nodes}
     for targets in outgoing.values():
@@ -148,8 +200,23 @@ def validate_workflow(workflow: Workflow, registry: ModelRegistry) -> list[str]:
             if indegree[target] == 0:
                 queue.append(target)
     if visited != len(workflow.nodes):
-        errors.append("Workflow contains a cycle")
-    return errors
+        add_global("Workflow contains a cycle")
+        for node_id, degree in indegree.items():
+            if degree > 0:
+                add_node(node_id, "Node participates in a workflow cycle")
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "global_errors": global_errors,
+        "node_errors": dict(node_errors),
+        "edge_errors": dict(edge_errors),
+    }
+
+
+def validate_workflow(workflow: Workflow, registry: ModelRegistry) -> list[str]:
+    """Compatibility helper for callers that only need flat messages."""
+
+    return validate_workflow_detailed(workflow, registry)["errors"]
 
 
 def topological_order(workflow: Workflow) -> list[str]:
