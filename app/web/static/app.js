@@ -55,6 +55,7 @@
   const state = {
     workflow: { id: uid('workflow'), name: t('workflow.defaultName'), nodes: [], edges: [] },
     models: [], selectedNode: null, selectedEdge: null, pendingPort: null, connectionDrag: null,
+    inspectorVisible: !window.matchMedia('(max-width:800px)').matches,
     transform: { x: 0, y: 0, scale: 1 }, panning: null, dragging: null,
     history: [], historyIndex: -1, running: false, validatingWorkflowIds: new Set(), cancelling: false, runId: null, runStatus: null, eventSource: null, runRefreshTimer: null,
     validation: { nodeErrors: {}, edgeErrors: {}, globalErrors: [], errors: [] },
@@ -538,7 +539,9 @@
     event.stopPropagation();
     event.preventDefault();
     const node = state.workflow.nodes.find(x => x.id === id);
-    selectNode(id); renderSelection(); document.body.classList.remove('inspector-open');
+    const usesInspectorDrawer = window.matchMedia('(max-width:800px)').matches;
+    selectNode(id, { revealInspector:!usesInspectorDrawer }); renderSelection(); renderInspector();
+    if (usesInspectorDrawer) setInspectorVisible(false);
     state.dragging = { id, pointerId:event.pointerId, captureEl:event.currentTarget, startX:event.clientX, startY:event.clientY, nodeX:node.data.x, nodeY:node.data.y, moved:false };
     event.currentTarget.setPointerCapture(event.pointerId);
   }
@@ -548,7 +551,9 @@
     cancelPointerInteractions(true);
     event.preventDefault();
     event.stopPropagation();
-    selectNode(nodeId); renderSelection(); document.body.classList.remove('inspector-open');
+    const usesInspectorDrawer = window.matchMedia('(max-width:800px)').matches;
+    selectNode(nodeId, { revealInspector:!usesInspectorDrawer }); renderSelection(); renderInspector();
+    if (usesInspectorDrawer) setInspectorVisible(false);
     const point = clientToWorld(event.clientX, event.clientY);
     const incoming = direction === 'input'
       ? state.workflow.edges.find(edge => edge.target === nodeId && edge.target_handle === portId)
@@ -630,6 +635,7 @@
     commit('创建连接');
     state.selectedEdge = state.workflow.edges.length - 1;
     state.selectedNode = null;
+    setInspectorVisible(true);
     return true;
   }
 
@@ -713,7 +719,7 @@
       const path = bezier(a,b);
       const invalid = Boolean(state.validation.edgeErrors[edge.id]);
       group.innerHTML = `<path class="edge-line ${state.selectedEdge === index ? 'active' : ''} ${invalid ? 'validation-error' : ''}" d="${path}"/><path class="edge-hit" d="${path}"/>`;
-      $('.edge-hit', group).addEventListener('click', event => { event.stopPropagation(); state.selectedEdge = index; state.selectedNode = null; renderSelection(); renderEdges(); renderInspector(); });
+      $('.edge-hit', group).addEventListener('click', event => { event.stopPropagation(); state.selectedEdge = index; state.selectedNode = null; setInspectorVisible(true); renderSelection(); renderEdges(); renderInspector(); });
       refs.svg.append(group);
     });
     const drag = state.connectionDrag;
@@ -730,7 +736,26 @@
     }
   }
 
-  function selectNode(id) { state.selectedNode = id; state.selectedEdge = null; }
+  function setInspectorVisible(visible) {
+    const nextVisible = Boolean(visible);
+    const layoutChanged = state.inspectorVisible !== nextVisible || document.body.classList.contains('inspector-open') !== nextVisible;
+    state.inspectorVisible = nextVisible;
+    document.body.classList.toggle('inspector-open', state.inspectorVisible);
+    document.body.classList.toggle('inspector-hidden', !state.inspectorVisible);
+    const panel = $('#propertiesPanel');
+    const toggle = $('#toggleInspector');
+    panel?.setAttribute('aria-hidden', String(!state.inspectorVisible));
+    toggle?.setAttribute('aria-expanded', String(state.inspectorVisible));
+    toggle?.classList.toggle('active', state.inspectorVisible);
+    if (!state.inspectorVisible && panel?.contains(document.activeElement)) toggle?.focus();
+    if (layoutChanged) requestAnimationFrame(() => { renderEdges(); drawMinimap(); });
+  }
+
+  function selectNode(id, { revealInspector = true } = {}) {
+    state.selectedNode = id;
+    state.selectedEdge = null;
+    if (revealInspector) setInspectorVisible(true);
+  }
   function renderSelection() {
     $$('.node', refs.nodes).forEach(element => element.classList.toggle('selected', element.dataset.nodeId === state.selectedNode));
   }
@@ -768,7 +793,7 @@
     flushActiveInspectorField();
     const node = state.workflow.nodes.find(x => x.id === state.selectedNode);
     const edge = state.selectedEdge !== null ? state.workflow.edges[state.selectedEdge] : null;
-    document.body.classList.toggle('inspector-open', Boolean(node || edge));
+    setInspectorVisible(state.inspectorVisible);
     if (!node) {
       const edgeValidation = edge ? state.validation.edgeErrors[edge.id] || [] : [];
       refs.inspector.innerHTML = edge
@@ -1639,7 +1664,9 @@
     $('#refreshRuns').addEventListener('click',()=>fetchRuns());
     $$('.manager-close').forEach(button=>button.addEventListener('click',()=>closeManager(button.dataset.closeManager)));
     $$('.manager-overlay').forEach(manager=>manager.addEventListener('pointerdown',event=>{if(event.target===manager)closeManager(manager.id);}));
-    $('#runWorkflow').addEventListener('click',runWorkflow);$('#cancelRun').addEventListener('click',cancelRun);$('#closeInspector').addEventListener('click',()=>{state.selectedNode=null;state.selectedEdge=null;renderSelection();renderEdges();renderInspector();});
+    $('#runWorkflow').addEventListener('click',runWorkflow);$('#cancelRun').addEventListener('click',cancelRun);
+    $('#closeInspector').addEventListener('click',()=>setInspectorVisible(false));
+    $('#toggleInspector').addEventListener('click',()=>setInspectorVisible(!state.inspectorVisible));
     $('#activityToggle').addEventListener('click',()=>{$('.activity-panel').classList.toggle('collapsed');$('#activityChevron').textContent=$('.activity-panel').classList.contains('collapsed')?'⌄':'⌃';});
     window.addEventListener('audioflow:localechange', renderLocalizedUI);
     window.addEventListener('resize',drawMinimap);
@@ -1712,7 +1739,7 @@
   }
 
   async function bootstrap() {
-    bindGlobalEvents();applyTransform();renderRunControls();loadModels();
+    bindGlobalEvents();setInspectorVisible(state.inspectorVisible);applyTransform();renderRunControls();loadModels();
     await initWorkflow();
     await recoverActiveRun();
     connectRunEvents();

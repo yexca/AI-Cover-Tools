@@ -71,6 +71,8 @@
           <button id="undoButton" title="Undo (Ctrl+Z)" data-i18n-title="canvas.toolbar.undo">↶</button>
           <button id="redoButton" title="Redo (Ctrl+Shift+Z)" data-i18n-title="canvas.toolbar.redo">↷</button>
           <span></span>
+          <button id="toggleInspector" title="Toggle properties" data-i18n-title="canvas.toolbar.properties" aria-controls="propertiesPanel" aria-expanded="true">▥</button>
+          <span></span>
           <button id="zoomOut" title="Zoom out" data-i18n-title="canvas.toolbar.zoomOut">−</button>
           <button class="zoom-label" id="zoomReset" title="Reset view" data-i18n-title="canvas.toolbar.resetView">100%</button>
           <button id="zoomIn" title="Zoom in" data-i18n-title="canvas.toolbar.zoomIn">＋</button>
@@ -92,10 +94,10 @@
       </div>
     </section>
 
-    <aside class="inspector-panel panel">
+    <aside class="inspector-panel panel" id="propertiesPanel">
       <div class="panel-title inspector-title">
         <div><span class="eyebrow" data-i18n="inspector.eyebrow">PROPERTIES</span><h1 data-i18n="inspector.title">Properties</h1></div>
-        <button class="icon-button small" id="closeInspector" title="Clear selection" data-i18n-title="inspector.close">×</button>
+        <button class="icon-button small" id="closeInspector" title="Close properties" data-i18n-title="inspector.close">×</button>
       </div>
       <div class="inspector-content" id="inspectorContent">
         <div class="inspector-empty"><div>◇</div><b data-i18n="inspector.empty.title">No node selected</b><span data-i18n="inspector.empty.description">Select a node on the canvas to edit its parameters</span></div>
