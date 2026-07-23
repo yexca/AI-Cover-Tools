@@ -68,7 +68,13 @@ Legacy editor node names such as `file_input`, `folder_input`, `model`, and `out
 
 - Drag a library item to the canvas or double-click it to add a node.
 - Click a node to open its properties.
-- On narrow viewports, properties use a right-side drawer instead of disappearing.
+- The interface uses a 16 px root font size, with larger labels, fields, workflow tabs, dialogs, and node text so the editor remains legible without browser zoom.
+- The node-library title, search and architecture filter, and model-count footer stay fixed within the sidebar. Only the grouped node list scrolls when its contents exceed the viewport height.
+- The node library and properties panel use mirrored controls at the left and right canvas edges. Collapsing a panel keeps its control attached to the corresponding edge so it can be reopened in place.
+- On desktop viewports, both sidebars can be resized by dragging their separators. Focused separators also accept the arrow keys in 10 px steps, Shift+arrow in 30 px steps, and Home/End for the allowed minimum/maximum width.
+- The preferred sidebar widths are 320 px for the node library and 360 px for properties. Widths are clamped to preserve a usable canvas and restored from browser-local storage; the node library allows 220-520 px and properties allows 260-520 px before viewport constraints are applied.
+- At 800 px or narrower, properties becomes a right-side overlay drawer and starts collapsed. At 650 px or narrower, the node library also becomes a left-side overlay drawer and starts collapsed, leaving the full-width canvas behind both drawers.
+- Drawer panel headers retain their own collapse controls because an open drawer covers the corresponding canvas-edge control. Sidebar visibility itself is derived from the current viewport when the page loads and is not persisted.
 - Text and number fields commit on blur or Enter. An active field is flushed before the inspector is rebuilt or the graph is replaced.
 - Path values are trimmed. An explicitly empty path remains empty and does not fall back to stale loaded data.
 - Connect ports by dragging in either direction. Dragging from an occupied input reconnects it.
@@ -81,7 +87,6 @@ Legacy editor node names such as `file_input`, `folder_input`, `model`, and `out
 - The Workflows dialog lists server-saved workflows and supports open, delete, save as, JSON import, and JSON export.
 - Save writes the current workflow to the local service. Export is a separate action and does not change saved state.
 - Server saves use a revision number. Updating a stale revision returns `409`; reopen the server copy or use Save as to keep both versions.
-- On mobile-width viewports, the node library becomes a left drawer so the canvas keeps the full viewport width.
 
 ## Model Registry and Refresh
 
@@ -185,6 +190,7 @@ Browser-local state:
 - `audioflow:draft-v2:<workflow-id>`: one recoverable draft per unsaved or modified workflow
 - `audioflow:draft-index-v2`: draft recency index, capped at 20 entries
 - `audioflow:workflow-tabs-v2` in session storage: open tab order and active tab
+- `audioflow:sidebar-layout-v1`: last user-adjusted widths for the node library and properties panel; expanded/collapsed state is not stored
 - `audioflow:model-cache`: last visible model list
 - `audioflow:locale`: locale preference
 
