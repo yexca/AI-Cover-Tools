@@ -17,7 +17,19 @@
   const DRAFT_INDEX_KEY = 'audioflow:draft-index-v2';
   const DRAFT_KEY_PREFIX = 'audioflow:draft-v2:';
   const TAB_STATE_KEY = 'audioflow:workflow-tabs-v2';
+  const SIDEBAR_LAYOUT_KEY = 'audioflow:sidebar-layout-v1';
+  const SIDEBAR_LIMITS = {
+    library: { min:220, max:520, defaultWidth:320 },
+    inspector: { min:260, max:520, defaultWidth:360 }
+  };
   const MAX_DRAFTS = 20;
+
+  function readSidebarLayout() {
+    try { return JSON.parse(localStorage.getItem(SIDEBAR_LAYOUT_KEY) || '{}'); }
+    catch { return {}; }
+  }
+
+  const savedSidebarLayout = readSidebarLayout();
 
   const refs = {
     viewport: $('#viewport'), world: $('#world'), nodes: $('#nodesLayer'), svg: $('#connectionsSvg'),
@@ -25,7 +37,9 @@
     empty: $('#emptyCanvas'), minimap: $('#minimap canvas'), log: $('#activityLog'),
     progress: $('#runProgress'), progressBar: $('#runProgressBar'), activityState: $('#activityState'),
     workflowName: $('#workflowName'), canvasTitle: $('#canvasTitle'), zoomLabel: $('#zoomReset'),
-    workflowList: $('#workflowList'), workflowTabs: $('#workflowTabs'), runList: $('#runList'), activeRunCount: $('#activeRunCount')
+    workflowList: $('#workflowList'), workflowTabs: $('#workflowTabs'), runList: $('#runList'), activeRunCount: $('#activeRunCount'),
+    appShell: $('.app-shell'), libraryPanel: $('#libraryPanel'), inspectorPanel: $('#propertiesPanel'),
+    libraryResizer: $('#libraryResizer'), inspectorResizer: $('#inspectorResizer')
   };
 
   const palette = {
@@ -55,14 +69,20 @@
   const state = {
     workflow: { id: uid('workflow'), name: t('workflow.defaultName'), nodes: [], edges: [] },
     models: [], selectedNode: null, selectedEdge: null, pendingPort: null, connectionDrag: null,
+    libraryVisible: !window.matchMedia('(max-width:650px)').matches,
     inspectorVisible: !window.matchMedia('(max-width:800px)').matches,
+    libraryWidth: Number(savedSidebarLayout.libraryWidth) || SIDEBAR_LIMITS.library.defaultWidth,
+    inspectorWidth: Number(savedSidebarLayout.inspectorWidth) || SIDEBAR_LIMITS.inspector.defaultWidth,
     transform: { x: 0, y: 0, scale: 1 }, panning: null, dragging: null,
+    sidebarResize: null,
     history: [], historyIndex: -1, running: false, validatingWorkflowIds: new Set(), cancelling: false, runId: null, runStatus: null, eventSource: null, runRefreshTimer: null,
     validation: { nodeErrors: {}, edgeErrors: {}, globalErrors: [], errors: [] },
     activityCollapsed: false, dirty: false, modelCacheUsed: false, modelServiceUnavailable: false,
     workflows: [], workflowSavePending: false, runs: [],
     editors: new Map(), openWorkflowIds: [], activeWorkflowId: null
   };
+  let libraryDrawerMode = window.matchMedia('(max-width:650px)').matches;
+  let inspectorDrawerMode = window.matchMedia('(max-width:800px)').matches;
 
   function normalizeOutputs(raw) {
     let outputs = raw.outputs || raw.stems || raw.instruments || raw.output_stems || [];
@@ -736,19 +756,178 @@
     }
   }
 
+  function clampSidebarWidth(value, side) {
+    const limits = SIDEBAR_LIMITS[side];
+    return Math.min(limits.max, Math.max(limits.min, Math.round(Number(value) || limits.defaultWidth)));
+  }
+
+  function currentSidebarWidth(side) {
+    const property = side === 'library' ? '--library-width' : '--inspector-width';
+    const value = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(property));
+    return Number.isFinite(value) ? value : SIDEBAR_LIMITS[side].defaultWidth;
+  }
+
+  function applySidebarWidths() {
+    let libraryWidth = clampSidebarWidth(state.libraryWidth, 'library');
+    let inspectorWidth = clampSidebarWidth(state.inspectorWidth, 'inspector');
+    if (window.innerWidth > 800) {
+      const canvasMinimum = window.innerWidth <= 1050 ? 300 : 420;
+      const handleWidth = (state.libraryVisible ? 6 : 0) + (state.inspectorVisible ? 6 : 0);
+      const available = Math.max(0, window.innerWidth - canvasMinimum - handleWidth);
+      const libraryUsed = state.libraryVisible ? libraryWidth : 0;
+      const inspectorUsed = state.inspectorVisible ? inspectorWidth : 0;
+      const excess = libraryUsed + inspectorUsed - available;
+      if (excess > 0 && state.libraryVisible && state.inspectorVisible) {
+        const librarySlack = libraryWidth - SIDEBAR_LIMITS.library.min;
+        const inspectorSlack = inspectorWidth - SIDEBAR_LIMITS.inspector.min;
+        const totalSlack = librarySlack + inspectorSlack;
+        if (totalSlack > 0) {
+          libraryWidth -= excess * librarySlack / totalSlack;
+          inspectorWidth -= excess * inspectorSlack / totalSlack;
+        }
+      } else if (excess > 0 && state.libraryVisible) {
+        libraryWidth = Math.max(SIDEBAR_LIMITS.library.min, libraryWidth - excess);
+      } else if (excess > 0 && state.inspectorVisible) {
+        inspectorWidth = Math.max(SIDEBAR_LIMITS.inspector.min, inspectorWidth - excess);
+      }
+    } else if (window.innerWidth > 650 && state.libraryVisible) {
+      libraryWidth = Math.min(libraryWidth, Math.max(SIDEBAR_LIMITS.library.min, window.innerWidth - 300));
+    }
+    libraryWidth = Math.round(libraryWidth);
+    inspectorWidth = Math.round(inspectorWidth);
+    document.documentElement.style.setProperty('--library-width', `${libraryWidth}px`);
+    document.documentElement.style.setProperty('--inspector-width', `${inspectorWidth}px`);
+    refs.libraryResizer?.setAttribute('aria-valuenow', String(libraryWidth));
+    refs.inspectorResizer?.setAttribute('aria-valuenow', String(inspectorWidth));
+    refs.libraryResizer?.setAttribute('aria-valuemax', String(Math.round(sidebarMaximum('library'))));
+    refs.inspectorResizer?.setAttribute('aria-valuemax', String(Math.round(sidebarMaximum('inspector'))));
+    return { library:libraryWidth, inspector:inspectorWidth };
+  }
+
+  function persistSidebarLayout() {
+    try { localStorage.setItem(SIDEBAR_LAYOUT_KEY, JSON.stringify({ libraryWidth:state.libraryWidth, inspectorWidth:state.inspectorWidth })); }
+    catch { /* storage may be unavailable */ }
+  }
+
+  function scheduleSidebarRedraw() {
+    requestAnimationFrame(() => { renderEdges(); drawMinimap(); });
+  }
+
+  function setLibraryVisible(visible) {
+    const nextVisible = Boolean(visible);
+    const layoutChanged = state.libraryVisible !== nextVisible || document.body.classList.contains('library-open') !== nextVisible;
+    state.libraryVisible = nextVisible;
+    document.body.classList.toggle('library-open', state.libraryVisible);
+    document.body.classList.toggle('library-hidden', !state.libraryVisible);
+    refs.libraryPanel?.setAttribute('aria-hidden', String(!state.libraryVisible));
+    if (refs.libraryPanel) refs.libraryPanel.inert = !state.libraryVisible;
+    const toggle = $('#toggleLibrary');
+    toggle?.setAttribute('aria-expanded', String(state.libraryVisible));
+    toggle?.classList.toggle('active', state.libraryVisible);
+    if (refs.libraryResizer) refs.libraryResizer.tabIndex = state.libraryVisible ? 0 : -1;
+    if (!state.libraryVisible && refs.libraryPanel?.contains(document.activeElement)) toggle?.focus();
+    applySidebarWidths();
+    if (layoutChanged) scheduleSidebarRedraw();
+  }
+
   function setInspectorVisible(visible) {
     const nextVisible = Boolean(visible);
     const layoutChanged = state.inspectorVisible !== nextVisible || document.body.classList.contains('inspector-open') !== nextVisible;
     state.inspectorVisible = nextVisible;
     document.body.classList.toggle('inspector-open', state.inspectorVisible);
     document.body.classList.toggle('inspector-hidden', !state.inspectorVisible);
-    const panel = $('#propertiesPanel');
+    const panel = refs.inspectorPanel;
     const toggle = $('#toggleInspector');
     panel?.setAttribute('aria-hidden', String(!state.inspectorVisible));
+    if (panel) panel.inert = !state.inspectorVisible;
     toggle?.setAttribute('aria-expanded', String(state.inspectorVisible));
     toggle?.classList.toggle('active', state.inspectorVisible);
+    if (refs.inspectorResizer) refs.inspectorResizer.tabIndex = state.inspectorVisible ? 0 : -1;
     if (!state.inspectorVisible && panel?.contains(document.activeElement)) toggle?.focus();
-    if (layoutChanged) requestAnimationFrame(() => { renderEdges(); drawMinimap(); });
+    applySidebarWidths();
+    if (layoutChanged) scheduleSidebarRedraw();
+  }
+
+  function sidebarMaximum(side) {
+    if (window.innerWidth <= 800) return SIDEBAR_LIMITS[side].max;
+    const otherSide = side === 'library' ? 'inspector' : 'library';
+    const otherVisible = otherSide === 'library' ? state.libraryVisible : state.inspectorVisible;
+    const otherWidth = otherVisible ? currentSidebarWidth(otherSide) : 0;
+    const canvasMinimum = window.innerWidth <= 1050 ? 300 : 420;
+    const handleWidth = (state.libraryVisible ? 6 : 0) + (state.inspectorVisible ? 6 : 0);
+    return Math.max(SIDEBAR_LIMITS[side].min, Math.min(SIDEBAR_LIMITS[side].max, window.innerWidth - canvasMinimum - handleWidth - otherWidth));
+  }
+
+  function setSidebarWidth(side, width, persist = false) {
+    const widthKey = side === 'library' ? 'libraryWidth' : 'inspectorWidth';
+    state[widthKey] = Math.min(sidebarMaximum(side), clampSidebarWidth(width, side));
+    const applied = applySidebarWidths();
+    state[widthKey] = applied[side];
+    if (persist) persistSidebarLayout();
+  }
+
+  function bindSidebarResizer(resizer, side) {
+    if (!resizer) return;
+    const widthKey = side === 'library' ? 'libraryWidth' : 'inspectorWidth';
+    const direction = side === 'library' ? 1 : -1;
+    resizer.addEventListener('pointerdown', event => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      state.libraryWidth = currentSidebarWidth('library');
+      state.inspectorWidth = currentSidebarWidth('inspector');
+      state.sidebarResize = { side, widthKey, direction, pointerId:event.pointerId, startX:event.clientX, startWidth:state[widthKey], element:resizer };
+      resizer.classList.add('active');
+      document.body.classList.add('sidebar-resizing');
+      resizer.setPointerCapture(event.pointerId);
+    });
+    const updateResize = event => {
+      const resize = state.sidebarResize;
+      if (!resize || resize.pointerId !== event.pointerId || resize.side !== side) return;
+      event.preventDefault();
+      setSidebarWidth(side, resize.startWidth + (event.clientX - resize.startX) * resize.direction);
+    };
+    const finishResize = event => {
+      const resize = state.sidebarResize;
+      if (!resize || resize.side !== side || (event.pointerId != null && resize.pointerId !== event.pointerId)) return;
+      state.sidebarResize = null;
+      resizer.classList.remove('active');
+      document.body.classList.remove('sidebar-resizing');
+      try { if (resizer.hasPointerCapture(resize.pointerId)) resizer.releasePointerCapture(resize.pointerId); } catch { /* capture may already be gone */ }
+      persistSidebarLayout();
+      scheduleSidebarRedraw();
+    };
+    document.addEventListener('pointermove', updateResize, { passive:false });
+    document.addEventListener('pointerup', finishResize);
+    document.addEventListener('pointercancel', finishResize);
+    resizer.addEventListener('lostpointercapture', finishResize);
+    window.addEventListener('blur', finishResize);
+    resizer.addEventListener('keydown', event => {
+      let nextWidth = currentSidebarWidth(side);
+      const step = event.shiftKey ? 30 : 10;
+      if (event.key === 'Home') nextWidth = SIDEBAR_LIMITS[side].min;
+      else if (event.key === 'End') nextWidth = sidebarMaximum(side);
+      else if (event.key === 'ArrowLeft') nextWidth += side === 'library' ? -step : step;
+      else if (event.key === 'ArrowRight') nextWidth += side === 'library' ? step : -step;
+      else return;
+      event.preventDefault();
+      setSidebarWidth(side, nextWidth, true);
+      scheduleSidebarRedraw();
+    });
+  }
+
+  function handleViewportResize() {
+    const nextLibraryDrawerMode = window.matchMedia('(max-width:650px)').matches;
+    const nextInspectorDrawerMode = window.matchMedia('(max-width:800px)').matches;
+    if (nextLibraryDrawerMode !== libraryDrawerMode) {
+      libraryDrawerMode = nextLibraryDrawerMode;
+      setLibraryVisible(!libraryDrawerMode);
+    }
+    if (nextInspectorDrawerMode !== inspectorDrawerMode) {
+      inspectorDrawerMode = nextInspectorDrawerMode;
+      setInspectorVisible(!inspectorDrawerMode);
+    }
+    applySidebarWidths();
+    drawMinimap();
   }
 
   function selectNode(id, { revealInspector = true } = {}) {
@@ -1653,7 +1832,10 @@
     refs.workflowName.addEventListener('input',()=>{state.workflow.name=refs.workflowName.value;refs.canvasTitle.textContent=refs.workflowName.value;commit('重命名工作流');});
     $('#saveWorkflow').addEventListener('click',saveWorkflow);
     $('#newWorkflow').addEventListener('click',createNewWorkflow);
-    $('#toggleLibrary').addEventListener('click',()=>document.body.classList.toggle('library-open'));
+    $('#toggleLibrary').addEventListener('click',()=>setLibraryVisible(!state.libraryVisible));
+    $('#closeLibrary').addEventListener('click',()=>setLibraryVisible(false));
+    bindSidebarResizer(refs.libraryResizer, 'library');
+    bindSidebarResizer(refs.inspectorResizer, 'inspector');
     $('#manageWorkflows').addEventListener('click',()=>{showManager('workflowManager');fetchWorkflows();});
     $('#refreshWorkflows').addEventListener('click',()=>fetchWorkflows());
     $('#saveAsWorkflow').addEventListener('click',saveWorkflowAs);
@@ -1669,7 +1851,7 @@
     $('#toggleInspector').addEventListener('click',()=>setInspectorVisible(!state.inspectorVisible));
     $('#activityToggle').addEventListener('click',()=>{$('.activity-panel').classList.toggle('collapsed');$('#activityChevron').textContent=$('.activity-panel').classList.contains('collapsed')?'⌄':'⌃';});
     window.addEventListener('audioflow:localechange', renderLocalizedUI);
-    window.addEventListener('resize',drawMinimap);
+    window.addEventListener('resize',handleViewportResize);
   }
 
   function renderLocalizedUI() {
@@ -1739,7 +1921,7 @@
   }
 
   async function bootstrap() {
-    bindGlobalEvents();setInspectorVisible(state.inspectorVisible);applyTransform();renderRunControls();loadModels();
+    bindGlobalEvents();setLibraryVisible(state.libraryVisible);setInspectorVisible(state.inspectorVisible);applySidebarWidths();applyTransform();renderRunControls();loadModels();
     await initWorkflow();
     await recoverActiveRun();
     connectRunEvents();

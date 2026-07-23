@@ -26,7 +26,6 @@
           <option value="en" data-i18n="locale.en">English</option>
         </select>
       </label>
-      <button class="icon-button mobile-only" id="toggleLibrary" title="Node library" data-i18n-title="library.toggle"><span>☰</span></button>
       <button class="icon-button" id="newWorkflow" title="New workflow" data-i18n-title="workflow.action.new"><span>＋</span></button>
       <button class="text-button" id="manageWorkflows"><span class="button-icon">▤</span> <span class="top-action-label" data-i18n="workflow.action.manage">Workflows</span></button>
       <button class="text-button" id="saveWorkflow"><span class="button-icon">↓</span> <span class="top-action-label" data-i18n="workflow.action.save">Save</span></button>
@@ -42,15 +41,18 @@
   </div>
 
   <main class="app-shell">
-    <aside class="library-panel panel">
+    <aside class="library-panel panel" id="libraryPanel">
       <div class="panel-title">
         <div><span class="eyebrow" data-i18n="library.eyebrow">NODE LIBRARY</span><h1 data-i18n="library.title">Node library</h1></div>
-        <div class="refresh-wrap">
-          <button class="icon-button small" id="refreshToggle" title="Refresh models" data-i18n-title="library.refresh.title">↻</button>
-          <div class="refresh-menu hidden" id="refreshMenu">
-            <button data-scope="local"><b data-i18n="library.refresh.local.title">Scan local models</b><span data-i18n="library.refresh.local.description">Fast and does not access the network</span></button>
-            <button data-scope="catalog"><b data-i18n="library.refresh.catalog.title">Sync online catalog</b><span data-i18n="library.refresh.catalog.description">Update downloadable model information</span></button>
+        <div class="panel-title-actions">
+          <div class="refresh-wrap">
+            <button class="icon-button small" id="refreshToggle" title="Refresh models" data-i18n-title="library.refresh.title">↻</button>
+            <div class="refresh-menu hidden" id="refreshMenu">
+              <button data-scope="local"><b data-i18n="library.refresh.local.title">Scan local models</b><span data-i18n="library.refresh.local.description">Fast and does not access the network</span></button>
+              <button data-scope="catalog"><b data-i18n="library.refresh.catalog.title">Sync online catalog</b><span data-i18n="library.refresh.catalog.description">Update downloadable model information</span></button>
+            </div>
           </div>
+          <button class="icon-button small panel-collapse" id="closeLibrary" title="Collapse node library" data-i18n-title="library.collapse">‹</button>
         </div>
       </div>
       <label class="search-box">
@@ -64,20 +66,22 @@
       <div class="library-footer"><span id="modelCount" data-i18n="library.models.loading">Loading models…</span><span class="status-dot" id="apiStatus"></span></div>
     </aside>
 
+    <div class="sidebar-resizer library-resizer" id="libraryResizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize node library" data-i18n-aria-label="library.resize" aria-valuemin="220" aria-valuemax="520" aria-valuenow="320"></div>
+
     <section class="canvas-panel" id="canvasPanel">
       <div class="canvas-toolbar">
+        <button class="sidebar-edge-toggle library-edge-toggle" id="toggleLibrary" title="Toggle node library" data-i18n-title="library.toggle" aria-label="Toggle node library" data-i18n-aria-label="library.toggle" aria-controls="libraryPanel" aria-expanded="true"><span class="sidebar-toggle-icon" aria-hidden="true"></span></button>
         <div class="crumb"><span data-i18n="canvas.breadcrumb.workflow">Workflow</span><b>/</b><strong id="canvasTitle">Vocal processing workflow</strong></div>
         <div class="canvas-tools">
           <button id="undoButton" title="Undo (Ctrl+Z)" data-i18n-title="canvas.toolbar.undo">↶</button>
           <button id="redoButton" title="Redo (Ctrl+Shift+Z)" data-i18n-title="canvas.toolbar.redo">↷</button>
-          <span></span>
-          <button id="toggleInspector" title="Toggle properties" data-i18n-title="canvas.toolbar.properties" aria-controls="propertiesPanel" aria-expanded="true">▥</button>
           <span></span>
           <button id="zoomOut" title="Zoom out" data-i18n-title="canvas.toolbar.zoomOut">−</button>
           <button class="zoom-label" id="zoomReset" title="Reset view" data-i18n-title="canvas.toolbar.resetView">100%</button>
           <button id="zoomIn" title="Zoom in" data-i18n-title="canvas.toolbar.zoomIn">＋</button>
           <button id="fitView" title="Fit view" data-i18n-title="canvas.toolbar.fitView">⌗</button>
         </div>
+        <button class="sidebar-edge-toggle inspector-edge-toggle" id="toggleInspector" title="Toggle properties" data-i18n-title="canvas.toolbar.properties" aria-label="Toggle properties" data-i18n-aria-label="canvas.toolbar.properties" aria-controls="propertiesPanel" aria-expanded="true"><span class="sidebar-toggle-icon" aria-hidden="true"></span></button>
       </div>
       <div class="canvas-viewport" id="viewport" tabindex="0">
         <div class="canvas-grid"></div>
@@ -94,10 +98,12 @@
       </div>
     </section>
 
+    <div class="sidebar-resizer inspector-resizer" id="inspectorResizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize properties" data-i18n-aria-label="inspector.resize" aria-valuemin="260" aria-valuemax="520" aria-valuenow="360"></div>
+
     <aside class="inspector-panel panel" id="propertiesPanel">
       <div class="panel-title inspector-title">
         <div><span class="eyebrow" data-i18n="inspector.eyebrow">PROPERTIES</span><h1 data-i18n="inspector.title">Properties</h1></div>
-        <button class="icon-button small" id="closeInspector" title="Close properties" data-i18n-title="inspector.close">×</button>
+        <button class="icon-button small panel-collapse" id="closeInspector" title="Collapse properties" data-i18n-title="inspector.close">›</button>
       </div>
       <div class="inspector-content" id="inspectorContent">
         <div class="inspector-empty"><div>◇</div><b data-i18n="inspector.empty.title">No node selected</b><span data-i18n="inspector.empty.description">Select a node on the canvas to edit its parameters</span></div>
