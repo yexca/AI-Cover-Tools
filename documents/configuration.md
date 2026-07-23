@@ -141,9 +141,14 @@ Defaults:
 WebUI server state is stored under `user_data`:
 
 - `model_registry.json`: detected model metadata
-- `web_workflows.json`: saved workflow payloads
-- `web_runs/<run-id>/`: intermediate separator artifacts
+- `workflows/<workflow-hash>.json`: independently saved, revisioned workflow payloads
+- `workflows/.legacy-migrated`: one-time migration marker for `web_workflows.json`
+- `web_runs/<run-id>/run.json`: run state and retained events
+- `web_runs/<run-id>/workflow.json`: immutable workflow snapshot used by the run
+- `web_runs/<run-id>/<node-id>/`: intermediate separator artifacts
 
-The browser also stores the current autosave and dirty flag, model-list cache, locale preference, and active run ID in local storage. The active run ID lets the WebUI reconnect after a page reload. These values are editor state, not root `config.py` overrides.
+The browser stores independent workflow drafts and their recency index, the model-list cache, and locale preference in local storage. Open tab order and the active tab are stored in session storage. Run tracking is reconciled from the server snapshot and global event stream instead of a browser-stored run ID. These values are editor state, not root `config.py` overrides.
+
+`web_workflows.json` is a retained legacy input. On first startup after this storage change, its valid workflows are copied into `workflows/`; subsequent reads and writes use the independent files.
 
 Separator nodes start with common defaults from `app/config/defaults.py`, then overlay the node's `options`, `mdx_params`, `vr_params`, `demucs_params`, and `mdxc_params`. Only an allowlisted subset of common separator options is forwarded by the WebUI executor.

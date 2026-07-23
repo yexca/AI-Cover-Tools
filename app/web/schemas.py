@@ -62,6 +62,7 @@ class Workflow(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex)
     name: str = "Untitled workflow"
     version: int = 1
+    revision: int = Field(default=0, ge=0)
     nodes: list[WorkflowNode] = Field(default_factory=list)
     edges: list[WorkflowEdge] = Field(default_factory=list)
     updated_at: str = Field(default_factory=utc_now)

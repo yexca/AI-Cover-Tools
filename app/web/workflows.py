@@ -4,13 +4,14 @@ import json
 import os
 import tempfile
 from collections import defaultdict, deque
+from hashlib import sha256
 from pathlib import Path
 from threading import RLock
 from typing import Any
 
 from .formats import AUDIO_EXTENSIONS
 from .model_registry import ModelRegistry
-from .paths import WORKFLOWS_PATH
+from .paths import LEGACY_WORKFLOWS_PATH, WORKFLOWS_DIR
 from .schemas import Workflow, utc_now
 
 
@@ -20,58 +21,158 @@ class WorkflowValidationError(ValueError):
         self.errors = errors
 
 
+class WorkflowConflictError(RuntimeError):
+    pass
+
+
+class WorkflowNotFoundError(LookupError):
+    pass
+
+
 class WorkflowStore:
-    def __init__(self, path: Path = WORKFLOWS_PATH) -> None:
-        self.path = path
+    def __init__(self, path: Path = WORKFLOWS_DIR, legacy_path: Path | None = None) -> None:
+        if path.suffix.lower() == ".json":
+            self.directory = path.with_suffix("")
+            self.legacy_path = path
+        else:
+            self.directory = path
+            self.legacy_path = legacy_path if legacy_path is not None else (
+                LEGACY_WORKFLOWS_PATH if path == WORKFLOWS_DIR else None
+            )
+        self.path = self.directory
         self._lock = RLock()
+        self._migrate_legacy()
 
-    def _read(self) -> dict[str, Any]:
+    @staticmethod
+    def _filename(workflow_id: str) -> str:
+        return f"{sha256(workflow_id.encode('utf-8')).hexdigest()}.json"
+
+    def _workflow_path(self, workflow_id: str) -> Path:
+        return self.directory / self._filename(workflow_id)
+
+    @staticmethod
+    def _read_path(path: Path) -> dict[str, Any] | None:
         try:
-            value = json.loads(self.path.read_text(encoding="utf-8"))
-            return value if isinstance(value, dict) else {}
+            value = json.loads(path.read_text(encoding="utf-8"))
+            return value if isinstance(value, dict) else None
         except (OSError, ValueError):
-            return {}
+            return None
 
-    def _write(self, value: dict[str, Any]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temporary = tempfile.mkstemp(prefix=self.path.name, suffix=".tmp", dir=self.path.parent)
+    @staticmethod
+    def _write_path(path: Path, value: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(prefix=path.name, suffix=".tmp", dir=path.parent)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
                 json.dump(value, stream, indent=2, ensure_ascii=False)
-            os.replace(temporary, self.path)
+            os.replace(temporary, path)
         finally:
             if os.path.exists(temporary):
                 os.unlink(temporary)
 
+    def _migrate_legacy(self) -> None:
+        if self.legacy_path is None or not self.legacy_path.is_file():
+            return
+        marker = self.directory / ".legacy-migrated"
+        if marker.exists():
+            return
+        with self._lock:
+            if marker.exists():
+                return
+            legacy = self._read_path(self.legacy_path)
+            if legacy is None:
+                return
+            self.directory.mkdir(parents=True, exist_ok=True)
+            for value in legacy.values():
+                try:
+                    workflow = Workflow.model_validate(value)
+                except (TypeError, ValueError):
+                    continue
+                target = self._workflow_path(workflow.id)
+                if not target.exists():
+                    if workflow.revision < 1:
+                        workflow.revision = 1
+                    self._write_path(target, workflow.model_dump(mode="json"))
+            self._write_path(marker, {"migrated": True})
+
     def list(self) -> list[dict[str, Any]]:
         with self._lock:
-            values = self._read().values()
+            values: list[Workflow] = []
+            if self.directory.exists():
+                for path in self.directory.glob("*.json"):
+                    raw = self._read_path(path)
+                    if raw is None:
+                        continue
+                    try:
+                        values.append(Workflow.model_validate(raw))
+                    except ValueError:
+                        continue
             return sorted(
-                ({"id": item["id"], "name": item.get("name", "Untitled workflow"), "updated_at": item.get("updated_at")} for item in values),
-                key=lambda item: item.get("updated_at") or "",
+                (
+                    {
+                        "id": workflow.id,
+                        "name": workflow.name,
+                        "revision": workflow.revision,
+                        "updated_at": workflow.updated_at,
+                    }
+                    for workflow in values
+                ),
+                key=lambda item: item["updated_at"],
                 reverse=True,
             )
 
     def get(self, workflow_id: str) -> Workflow | None:
         with self._lock:
-            value = self._read().get(workflow_id)
-        return Workflow.model_validate(value) if value else None
+            value = self._read_path(self._workflow_path(workflow_id))
+        if value is None or value.get("id") != workflow_id:
+            return None
+        try:
+            return Workflow.model_validate(value)
+        except ValueError:
+            return None
+
+    def create(self, workflow: Workflow) -> Workflow:
+        with self._lock:
+            target = self._workflow_path(workflow.id)
+            if target.exists():
+                raise WorkflowConflictError(f"Workflow '{workflow.id}' already exists")
+            workflow.updated_at = utc_now()
+            workflow.revision = 1
+            self._write_path(target, workflow.model_dump(mode="json"))
+        return workflow
+
+    def update(self, workflow_id: str, workflow: Workflow) -> Workflow:
+        with self._lock:
+            target = self._workflow_path(workflow_id)
+            stored_raw = self._read_path(target)
+            if stored_raw is None or stored_raw.get("id") != workflow_id:
+                raise WorkflowNotFoundError(f"Workflow '{workflow_id}' was not found")
+            stored = Workflow.model_validate(stored_raw)
+            if workflow.revision != stored.revision:
+                raise WorkflowConflictError(
+                    f"Workflow '{workflow_id}' changed on disk (expected revision {workflow.revision}, current {stored.revision})"
+                )
+            workflow.id = workflow_id
+            workflow.updated_at = utc_now()
+            workflow.revision = stored.revision + 1
+            self._write_path(target, workflow.model_dump(mode="json"))
+        return workflow
 
     def save(self, workflow: Workflow) -> Workflow:
-        workflow.updated_at = utc_now()
-        with self._lock:
-            values = self._read()
-            values[workflow.id] = workflow.model_dump(mode="json")
-            self._write(values)
-        return workflow
+        stored = self.get(workflow.id)
+        if stored is None:
+            return self.create(workflow)
+        workflow.revision = stored.revision
+        return self.update(workflow.id, workflow)
 
     def delete(self, workflow_id: str) -> bool:
         with self._lock:
-            values = self._read()
-            existed = values.pop(workflow_id, None) is not None
-            if existed:
-                self._write(values)
-        return existed
+            target = self._workflow_path(workflow_id)
+            value = self._read_path(target)
+            if value is None or value.get("id") != workflow_id:
+                return False
+            target.unlink()
+            return True
 
 
 def validate_workflow_detailed(workflow: Workflow, registry: ModelRegistry) -> dict[str, Any]:

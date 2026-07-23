@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from app.web.executor import RunManager
 from app.web.main import create_app
 from app.web.model_registry import ModelRegistry
 from app.web.schemas import RunRequest, Workflow
@@ -26,19 +28,61 @@ class WorkflowTests(unittest.TestCase):
             app = create_app(
                 ModelRegistry(root / "models", root / "registry.json"),
                 WorkflowStore(root / "workflows.json"),
+                RunManager(ModelRegistry(root / "models", root / "run-registry.json"), root / "runs"),
             )
             with TestClient(app, client=("127.0.0.1", 50100)) as client:
                 first = client.post("/api/workflows", json={"id": "first", "name": "First"})
                 second = client.post("/api/workflows", json={"id": "second", "name": "Second"})
                 self.assertEqual(first.status_code, 201)
                 self.assertEqual(second.status_code, 201)
+                self.assertEqual(first.json()["revision"], 1)
                 self.assertEqual({item["id"] for item in client.get("/api/workflows").json()["workflows"]}, {"first", "second"})
 
-                updated = client.put("/api/workflows/first", json={"id": "ignored", "name": "Renamed"})
+                updated = client.put(
+                    "/api/workflows/first",
+                    json={"id": "ignored", "name": "Renamed", "revision": first.json()["revision"]},
+                )
                 self.assertEqual(updated.json()["id"], "first")
+                self.assertEqual(updated.json()["revision"], 2)
                 self.assertEqual(client.get("/api/workflows/first").json()["name"], "Renamed")
                 self.assertEqual(client.delete("/api/workflows/second").status_code, 200)
                 self.assertEqual([item["id"] for item in client.get("/api/workflows").json()["workflows"]], ["first"])
+
+                self.assertEqual(client.post("/api/workflows", json={"id": "first"}).status_code, 409)
+                self.assertEqual(
+                    client.put("/api/workflows/first", json={"name": "Stale", "revision": 1}).status_code,
+                    409,
+                )
+                self.assertEqual(
+                    client.put("/api/workflows/missing", json={"name": "Missing", "revision": 1}).status_code,
+                    404,
+                )
+
+            workflow_files = list((root / "workflows").glob("*.json"))
+            self.assertEqual(len(workflow_files), 1)
+            self.assertEqual(json.loads(workflow_files[0].read_text(encoding="utf-8"))["id"], "first")
+
+    def test_legacy_workflow_blob_is_migrated_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            legacy = Path(temporary) / "workflows.json"
+            legacy.write_text(
+                json.dumps(
+                    {
+                        "first": {"id": "first", "name": "First"},
+                        "second": {"id": "second", "name": "Second"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            store = WorkflowStore(legacy)
+            self.assertEqual({item["id"] for item in store.list()}, {"first", "second"})
+            self.assertTrue(legacy.exists())
+            self.assertTrue((legacy.with_suffix("") / ".legacy-migrated").exists())
+
+            self.assertTrue(store.delete("second"))
+            reloaded = WorkflowStore(legacy)
+            self.assertEqual([item["id"] for item in reloaded.list()], ["first"])
 
     def test_editor_payload_is_normalized_and_validated(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -136,6 +180,7 @@ class WorkflowTests(unittest.TestCase):
             app = create_app(
                 ModelRegistry(root / "models", root / "registry.json"),
                 WorkflowStore(root / "workflows.json"),
+                RunManager(ModelRegistry(root / "models", root / "run-registry.json"), root / "runs"),
             )
             workflow = {
                 "nodes": [

@@ -14,7 +14,7 @@ from .dialogs import DialogBusyError, DialogError, DialogRequest, is_loopback_cl
 from .model_registry import ModelRegistry
 from .paths import STATIC_DIR
 from .schemas import RefreshRequest, RunRequest, Workflow
-from .workflows import WorkflowStore, validate_workflow_detailed
+from .workflows import WorkflowConflictError, WorkflowNotFoundError, WorkflowStore, validate_workflow_detailed
 
 
 def create_app(
@@ -108,7 +108,10 @@ def create_app(
 
     @app.post("/api/workflows", status_code=status.HTTP_201_CREATED)
     def create_workflow(workflow: Workflow) -> Workflow:
-        return workflows.save(workflow)
+        try:
+            return workflows.create(workflow)
+        except WorkflowConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/api/workflows/{workflow_id}")
     def get_workflow(workflow_id: str) -> Workflow:
@@ -119,8 +122,12 @@ def create_app(
 
     @app.put("/api/workflows/{workflow_id}")
     def update_workflow(workflow_id: str, workflow: Workflow) -> Workflow:
-        workflow.id = workflow_id
-        return workflows.save(workflow)
+        try:
+            return workflows.update(workflow_id, workflow)
+        except WorkflowNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except WorkflowConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.delete("/api/workflows/{workflow_id}")
     def delete_workflow(workflow_id: str) -> dict[str, bool]:
@@ -135,7 +142,8 @@ def create_app(
     @app.get("/api/runs")
     def list_runs(limit: int = Query(default=100, ge=1, le=500)) -> dict[str, Any]:
         values = runs.list(limit=limit)
-        return {"runs": values, "total": len(values)}
+        snapshot = runs.snapshot(limit=limit)
+        return {"runs": values, "total": len(values), **snapshot}
 
     @app.post("/api/runs", status_code=status.HTTP_202_ACCEPTED)
     def create_run(payload: RunRequest) -> dict[str, Any]:
@@ -167,9 +175,30 @@ def create_app(
     async def run_events(run_id: str, request: Request) -> StreamingResponse:
         if not runs.get(run_id):
             raise HTTPException(status_code=404, detail="Run not found")
+        last_event_id = request.headers.get("last-event-id", "0")
+        try:
+            after_sequence = max(0, int(last_event_id))
+        except ValueError:
+            after_sequence = 0
 
         async def stream():
-            async for event in runs.events(run_id):
+            async for event in runs.events(run_id, after_sequence):
+                if await request.is_disconnected():
+                    break
+                yield event
+
+        return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    @app.get("/api/events/runs")
+    async def run_event_stream(request: Request) -> StreamingResponse:
+        last_event_id = request.headers.get("last-event-id", "0")
+        try:
+            after_sequence = max(0, int(last_event_id))
+        except ValueError:
+            after_sequence = 0
+
+        async def stream():
+            async for event in runs.global_events(after_sequence):
                 if await request.is_disconnected():
                     break
                 yield event
@@ -200,6 +229,3 @@ def create_app(
             raise HTTPException(status_code=404, detail="Not found")
 
     return app
-
-
-app = create_app()

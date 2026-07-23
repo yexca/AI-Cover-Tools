@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import tempfile
 import threading
 import time
@@ -20,7 +22,7 @@ class ExecutorTests(unittest.TestCase):
             source.write_bytes(b"test-audio-placeholder")
             output = root / "output"
             registry = ModelRegistry(root / "models", root / "registry.json")
-            manager = RunManager(registry)
+            manager = RunManager(registry, root / "runs")
             workflow = Workflow.model_validate(
                 {
                     "id": "copy-test",
@@ -35,14 +37,13 @@ class ExecutorTests(unittest.TestCase):
                     "edges": [{"source": "input", "source_handle": "audio", "target": "output"}],
                 }
             )
-            with patch("app.web.executor.RUNS_DIR", root / "runs"):
-                run_id = manager.submit(workflow)["id"]
-                deadline = time.monotonic() + 3
-                while time.monotonic() < deadline:
-                    state = manager.get(run_id)
-                    if state and state["status"] in {"completed", "failed", "cancelled"}:
-                        break
-                    time.sleep(0.02)
+            run_id = manager.submit(workflow)["id"]
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                state = manager.get(run_id)
+                if state and state["status"] in {"completed", "failed", "cancelled"}:
+                    break
+                time.sleep(0.02)
             manager.shutdown()
 
             self.assertEqual(state["status"], "completed")
@@ -50,8 +51,8 @@ class ExecutorTests(unittest.TestCase):
 
     def test_run_list_reports_queue_position_and_truthful_cancellation(self) -> None:
         class BlockingRunManager(RunManager):
-            def __init__(self, registry: ModelRegistry) -> None:
-                super().__init__(registry)
+            def __init__(self, registry: ModelRegistry, runs_dir: Path) -> None:
+                super().__init__(registry, runs_dir)
                 self.started = threading.Event()
                 self.release = threading.Event()
 
@@ -63,7 +64,7 @@ class ExecutorTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            manager = BlockingRunManager(ModelRegistry(root / "models", root / "registry.json"))
+            manager = BlockingRunManager(ModelRegistry(root / "models", root / "registry.json"), root / "runs")
             try:
                 first = manager.submit(Workflow(id="first", name="First workflow"))
                 self.assertTrue(manager.started.wait(timeout=1))
@@ -80,6 +81,70 @@ class ExecutorTests(unittest.TestCase):
                 self.assertEqual(manager.get(first["id"])["status"], "cancelling")
             finally:
                 manager.release.set()
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    if all(
+                        manager.get(run_id)["status"] in {"completed", "failed", "cancelled"}
+                        for run_id in (first["id"], second["id"])
+                    ):
+                        break
+                    time.sleep(0.02)
+                manager.shutdown()
+
+    def test_run_state_and_workflow_snapshot_survive_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            run_dir = root / "runs" / "stale-run"
+            run_dir.mkdir(parents=True)
+            (run_dir / "workflow.json").write_text(
+                json.dumps({"id": "workflow-1", "name": "Persisted workflow", "nodes": [], "edges": []}),
+                encoding="utf-8",
+            )
+            (run_dir / "run.json").write_text(
+                json.dumps(
+                    {
+                        "id": "stale-run",
+                        "workflow_id": "workflow-1",
+                        "workflow_name": "Persisted workflow",
+                        "status": "running",
+                        "progress": 0.4,
+                        "message": "Running",
+                        "created_at": "2026-07-23T00:00:00+00:00",
+                        "events": [
+                            {
+                                "sequence": 7,
+                                "type": "started",
+                                "run_id": "stale-run",
+                                "timestamp": "2026-07-23T00:00:01+00:00",
+                                "message": "Workflow started",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            manager = RunManager(ModelRegistry(root / "models", root / "registry.json"), root / "runs")
+            try:
+                restored = manager.get("stale-run")
+                self.assertEqual(restored["status"], "failed")
+                self.assertEqual(restored["workflow"]["id"], "workflow-1")
+                self.assertIn("stopped before", restored["error"])
+                snapshot = manager.snapshot()
+                self.assertEqual(snapshot["active"], [])
+                self.assertEqual(snapshot["history"][0]["id"], "stale-run")
+
+                async def read_event() -> str:
+                    events = manager.global_events(after_sequence=7)
+                    try:
+                        return await anext(events)
+                    finally:
+                        await events.aclose()
+
+                event = asyncio.run(read_event())
+                self.assertIn('"type": "failed"', event)
+                self.assertIn("id: 8", event)
+            finally:
                 manager.shutdown()
 
 

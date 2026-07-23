@@ -15,9 +15,15 @@ from app.web.dialogs import (
     is_loopback_client,
     pick_path,
 )
+from app.web.executor import RunManager
 from app.web.main import create_app
 from app.web.model_registry import ModelRegistry
 from app.web.workflows import WorkflowStore
+
+
+def create_test_app(root: Path):
+    registry = ModelRegistry(root / "models", root / "registry.json")
+    return create_app(registry, WorkflowStore(root / "workflows.json"), RunManager(registry, root / "runs"))
 
 
 class _Root:
@@ -99,10 +105,7 @@ class DialogTests(unittest.TestCase):
     def test_loopback_api_returns_mocked_path(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            app = create_app(
-                ModelRegistry(root / "models", root / "registry.json"),
-                WorkflowStore(root / "workflows.json"),
-            )
+            app = create_test_app(root)
             selected = str((root / "audio.wav").resolve())
             with patch("app.web.main.pick_path", return_value={"path": selected, "cancelled": False, "error": None}):
                 with TestClient(app, client=("127.0.0.1", 50100)) as client:
@@ -113,10 +116,7 @@ class DialogTests(unittest.TestCase):
     def test_non_loopback_api_is_rejected_without_opening_dialog(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            app = create_app(
-                ModelRegistry(root / "models", root / "registry.json"),
-                WorkflowStore(root / "workflows.json"),
-            )
+            app = create_test_app(root)
             with patch("app.web.main.pick_path") as picker:
                 with TestClient(app, client=("192.168.1.20", 50100)) as client:
                     response = client.post("/api/dialog/pick", json={"kind": "input_directory"})
@@ -127,10 +127,7 @@ class DialogTests(unittest.TestCase):
     def test_dialog_exception_has_stable_error_shape(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            app = create_app(
-                ModelRegistry(root / "models", root / "registry.json"),
-                WorkflowStore(root / "workflows.json"),
-            )
+            app = create_test_app(root)
             with patch("app.web.main.pick_path", side_effect=RuntimeError("desktop unavailable")):
                 with TestClient(app, client=("127.0.0.1", 50100)) as client:
                     response = client.post("/api/dialog/pick", json={"kind": "output_directory"})
@@ -147,10 +144,7 @@ class DialogTests(unittest.TestCase):
     def test_dialog_busy_has_stable_conflict_response(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            app = create_app(
-                ModelRegistry(root / "models", root / "registry.json"),
-                WorkflowStore(root / "workflows.json"),
-            )
+            app = create_test_app(root)
             with patch("app.web.main.pick_path", side_effect=DialogBusyError()):
                 with TestClient(app, client=("127.0.0.1", 50100)) as client:
                     response = client.post("/api/dialog/pick", json={"kind": "output_directory", "locale": "zh-CN"})

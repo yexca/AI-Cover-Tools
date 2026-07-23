@@ -201,6 +201,9 @@ class DummyRunManager:
             }
         ][:limit]
 
+    def snapshot(self, limit=100):
+        return {"active": self.list(limit), "history": []}
+
     def get(self, run_id):
         return None
 
@@ -248,6 +251,9 @@ class ApiAndStaticTests(unittest.TestCase):
                 runs = client.get("/api/runs")
                 self.assertEqual(runs.status_code, 200)
                 self.assertEqual(runs.json()["runs"][0]["queue_position"], 1)
+                self.assertEqual(runs.json()["active"], runs.json()["runs"])
+                self.assertEqual(runs.json()["history"], [])
+                self.assertIn("/api/events/runs", client.get("/openapi.json").json()["paths"])
 
                 payload = workflow_payload(root / "song.wav", root / "vocals", root / "instrumental")
                 created = client.post("/api/workflows", json=payload)
@@ -306,14 +312,14 @@ class ExecutorBranchingTests(unittest.TestCase):
                 Path(command[-1]).write_bytes(source_path.read_bytes())
                 return types.SimpleNamespace(returncode=0, stderr="")
 
-            manager = RunManager(FixtureRegistry())
+            manager = RunManager(FixtureRegistry(), root / "runs")
             try:
                 with patch.dict(
                     sys.modules,
                     {"audio_separator": fake_package, "audio_separator.separator": fake_separator_module},
-                ), patch("app.web.executor.RUNS_DIR", root / "runs"), patch(
-                    "app.web.executor.MODELS_DIR", root / "models"
-                ), patch("app.web.executor.shutil.which", return_value="ffmpeg"), patch(
+                ), patch("app.web.executor.MODELS_DIR", root / "models"), patch(
+                    "app.web.executor.shutil.which", return_value="ffmpeg"
+                ), patch(
                     "app.web.executor.subprocess.run", side_effect=fake_ffmpeg
                 ):
                     submitted = manager.submit(workflow)

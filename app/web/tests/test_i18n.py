@@ -53,10 +53,18 @@ class I18nTests(unittest.TestCase):
         source = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
         index = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
         self.assertIn('id="workflowManager"', index)
+        self.assertIn('id="workflowTabs"', index)
         self.assertIn('id="runManager"', index)
         self.assertIn("async function fetchWorkflows", source)
         self.assertIn("async function fetchRuns", source)
         self.assertIn("async function recoverActiveRun", source)
+        self.assertIn("audioflow:draft-v2:", source)
+        self.assertIn("openIds:drafts.map(item => item.id)", source)
+        self.assertIn("audioflow:workflow-tabs-v2", source)
+        self.assertIn("new EventSource('/api/events/runs')", source)
+        self.assertIn("loadWorkflowData(run.workflow, { dirty:false, notify:false })", source)
+        self.assertNotIn("audioflow:active-run-id", source)
+        self.assertNotIn("/api/runs/${encodeURIComponent(id)}/events", source)
         self.assertIn("state.cancelling = lifecycleStatus === 'cancelling'", source)
 
 

@@ -76,8 +76,11 @@ Legacy editor node names such as `file_input`, `folder_input`, `model`, and `out
 - Pointer state is cleared on pointer up, cancellation, lost capture, window blur, node deletion, workflow load, new workflow, undo, and redo.
 - Canvas panning disables browser text selection and uses pointer capture.
 - Validation errors are mapped back to node and edge IDs and highlighted on the graph.
+- Open workflows use a tab bar. Each tab retains its own graph, undo history, dirty state, and canvas transform while another tab is active.
+- Unsaved and modified tabs keep independent browser drafts. Reload restores the session tab order; without a tab session, all retained drafts are reopened with the most recent active. The previous single-workflow autosave is imported once when no newer draft can be restored.
 - The Workflows dialog lists server-saved workflows and supports open, delete, save as, JSON import, and JSON export.
 - Save writes the current workflow to the local service. Export is a separate action and does not change saved state.
+- Server saves use a revision number. Updating a stale revision returns `409`; reopen the server copy or use Save as to keep both versions.
 - On mobile-width viewports, the node library becomes a left drawer so the canvas keeps the full viewport width.
 
 ## Model Registry and Refresh
@@ -150,7 +153,7 @@ Validation checks:
 - required separator and output inputs
 - graph cycles
 
-Runs are submitted to a `RunManager` with one worker. This prevents concurrent model jobs from competing for the GPU. Events are exposed through server-sent events at `/api/runs/{run_id}/events`.
+Runs are submitted to a `RunManager` with one worker. This prevents concurrent model jobs from competing for the GPU. The frontend keeps one global server-sent event connection at `/api/events/runs`; `/api/runs/{run_id}/events` remains available for a single-run consumer. Both streams support `Last-Event-ID` resume semantics.
 
 Execution stages:
 
@@ -173,25 +176,31 @@ Conflict modes are `rename`, `overwrite`, and `skip`. Output paths are checked s
 Cancellation is cooperative. It is checked between files and nodes; an active model call may need to finish before cancellation takes effect.
 The frontend keeps the run in a cancelling state until the server reports a terminal cancellation event.
 
-The Runs dialog shows the current single-worker queue and completed runs from the current server session. Active run IDs are retained in browser storage, allowing a page reload to reconnect to the run event stream. Any active run can also be selected from the run list for tracking or cancellation.
+The Runs dialog shows the current single-worker queue and persisted run history. Each submitted run retains an immutable workflow snapshot. On reload, the frontend reconciles the active workflow tab with the server run snapshot and keeps receiving global run events; it does not depend on a browser-stored active run ID. Background workflow tabs show their run state, and any active run can be selected from the run list for tracking or cancellation.
 
 ## Persistence
 
 Browser-local state:
 
-- `audioflow:autosave`: current workflow payload
-- `audioflow:autosave-dirty`: whether the browser draft differs from its last server save
+- `audioflow:draft-v2:<workflow-id>`: one recoverable draft per unsaved or modified workflow
+- `audioflow:draft-index-v2`: draft recency index, capped at 20 entries
+- `audioflow:workflow-tabs-v2` in session storage: open tab order and active tab
 - `audioflow:model-cache`: last visible model list
 - `audioflow:locale`: locale preference
-- `audioflow:active-run-id`: run to reconnect after a page reload
+
+The legacy `audioflow:autosave` and `audioflow:autosave-dirty` values are read only for one-time migration.
 
 Server-local state:
 
 - `user_data/model_registry.json`: model metadata cache
-- `user_data/web_workflows.json`: saved workflows
-- `user_data/web_runs/<run-id>/`: intermediate run output
+- `user_data/workflows/<workflow-hash>.json`: one revisioned file per saved workflow
+- `user_data/web_runs/<run-id>/run.json`: persisted run status and event history
+- `user_data/web_runs/<run-id>/workflow.json`: immutable submitted workflow snapshot
+- `user_data/web_runs/<run-id>/<node-id>/`: intermediate separator output
 
-The Workflows dialog uses the server CRUD API for normal persistence. JSON import and export remain available as explicit portability actions. The browser autosave stores only the active draft; it does not replace the server workflow list.
+Existing `user_data/web_workflows.json` data is migrated into the workflow directory once. The legacy file is retained, and `user_data/workflows/.legacy-migrated` prevents deleted workflows from being imported again.
+
+The Workflows dialog uses the server CRUD API for normal persistence. JSON import and export remain explicit portability actions. Browser drafts recover editor state but do not replace server workflow storage.
 
 ## Internationalization
 
@@ -217,15 +226,15 @@ Do not translate user workflow names, custom node titles, filesystem paths, mode
 | `GET/PUT/DELETE` | `/api/workflows/{id}` | workflow CRUD |
 | `POST` | `/api/workflows/validate` | structured pre-run validation |
 | `POST` | `/api/runs` | queue a workflow |
-| `GET` | `/api/runs` | list current-session runs and queue positions |
+| `GET` | `/api/runs` | list persisted runs plus active/history snapshots |
 | `GET/DELETE` | `/api/runs/{id}` | inspect or cancel a run |
 | `GET` | `/api/runs/{id}/events` | SSE run events |
+| `GET` | `/api/events/runs` | global SSE events for all runs |
 
 ## Current Limitations
 
 - Models with uncertain function or outputs need an explicit metadata editor.
 - The executor visits every node in topological order; it does not yet prune nodes that cannot reach an output.
-- Run history survives browser reloads but remains in memory and is not restored after a server restart.
 - Advanced separator parameters are present in the backend but only a small subset is exposed in the inspector.
 - Multi-select, copy/paste, groups, comments, and reusable subgraphs are not implemented.
 

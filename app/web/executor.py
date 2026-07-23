@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import traceback
 from collections import defaultdict
@@ -52,11 +54,12 @@ class RunState:
     error: str | None = None
     outputs: list[str] = field(default_factory=list)
     events: list[dict[str, Any]] = field(default_factory=list)
+    workflow_snapshot: dict[str, Any] | None = field(default=None, repr=False)
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
     future: Future[Any] | None = field(default=None, repr=False)
 
-    def public(self, queue_position: int | None = None) -> dict[str, Any]:
-        return {
+    def public(self, queue_position: int | None = None, include_workflow: bool = False) -> dict[str, Any]:
+        value = {
             "id": self.id,
             "workflow_id": self.workflow_id,
             "workflow_name": self.workflow_name,
@@ -70,6 +73,15 @@ class RunState:
             "error": self.error,
             "outputs": self.outputs,
         }
+        if include_workflow:
+            value["workflow"] = self.workflow_snapshot
+        return value
+
+    def record(self) -> dict[str, Any]:
+        return {
+            **self.public(),
+            "events": self.events,
+        }
 
 
 class CancelledError(RuntimeError):
@@ -79,20 +91,36 @@ class CancelledError(RuntimeError):
 class RunManager:
     """A one-worker queue. GPU models can never execute concurrently."""
 
-    def __init__(self, registry: ModelRegistry) -> None:
+    _ACTIVE_STATUSES = {"queued", "running", "cancelling"}
+    _TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
+    _MAX_EVENTS_PER_RUN = 2000
+    _MAX_GLOBAL_EVENTS = 5000
+
+    def __init__(self, registry: ModelRegistry, runs_dir: Path | None = None) -> None:
         self.registry = registry
+        self.runs_dir = runs_dir or RUNS_DIR
         self._runs: dict[str, RunState] = {}
         self._lock = threading.RLock()
+        self._events: list[dict[str, Any]] = []
+        self._next_sequence = 1
+        self._load_runs()
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="audio-web-workflow")
 
     def submit(self, workflow: Workflow) -> dict[str, Any]:
-        run = RunState(id=uuid4().hex, workflow_id=workflow.id, workflow_name=workflow.name)
+        snapshot = workflow.model_dump(mode="json")
+        run = RunState(
+            id=uuid4().hex,
+            workflow_id=workflow.id,
+            workflow_name=workflow.name,
+            workflow_snapshot=snapshot,
+        )
         with self._lock:
             self._runs[run.id] = run
+            self._persist_workflow(run)
             self._event(run, "queued", "Workflow queued", progress=0.0)
             run.future = self._pool.submit(self._execute, run, workflow)
             positions = self._queue_positions()
-            return run.public(positions.get(run.id))
+            return run.public(positions.get(run.id), include_workflow=True)
 
     def get(self, run_id: str) -> dict[str, Any] | None:
         with self._lock:
@@ -100,13 +128,20 @@ class RunManager:
             if not run:
                 return None
             positions = self._queue_positions()
-            return run.public(positions.get(run.id))
+            return run.public(positions.get(run.id), include_workflow=True)
 
     def list(self, limit: int = 100) -> list[dict[str, Any]]:
         with self._lock:
             positions = self._queue_positions()
             runs = list(self._runs.values())[-limit:]
             return [run.public(positions.get(run.id)) for run in reversed(runs)]
+
+    def snapshot(self, limit: int = 100) -> dict[str, list[dict[str, Any]]]:
+        runs = self.list(limit=limit)
+        return {
+            "active": [run for run in runs if run["status"] in self._ACTIVE_STATUSES],
+            "history": [run for run in runs if run["status"] in self._TERMINAL_STATUSES],
+        }
 
     def _queue_positions(self) -> dict[str, int]:
         queued = (run for run in self._runs.values() if run.status == "queued")
@@ -131,23 +166,35 @@ class RunManager:
             positions = self._queue_positions()
             return run.public(positions.get(run.id))
 
-    async def events(self, run_id: str) -> AsyncIterator[str]:
-        cursor = 0
+    async def events(self, run_id: str, after_sequence: int = 0) -> AsyncIterator[str]:
+        cursor = after_sequence
         while True:
             with self._lock:
                 run = self._runs.get(run_id)
                 if not run:
                     yield f"event: error\ndata: {json.dumps({'error': 'Run not found'})}\n\n"
                     return
-                pending = run.events[cursor:]
-                cursor = len(run.events)
+                pending = [event for event in run.events if int(event.get("sequence", 0)) > cursor]
                 terminal = run.status in {"completed", "failed", "cancelled"}
             for event in pending:
+                cursor = int(event["sequence"])
                 # Unnamed SSE messages are consumed by EventSource.onmessage and carry
                 # their semantic type inside the JSON payload.
                 yield f"id: {event['sequence']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
             if terminal and not pending:
                 return
+            if not pending:
+                yield ": keep-alive\n\n"
+            await asyncio.sleep(0.35)
+
+    async def global_events(self, after_sequence: int = 0) -> AsyncIterator[str]:
+        cursor = after_sequence
+        while True:
+            with self._lock:
+                pending = [event for event in self._events if int(event.get("sequence", 0)) > cursor]
+            for event in pending:
+                cursor = int(event["sequence"])
+                yield f"id: {cursor}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
             if not pending:
                 yield ": keep-alive\n\n"
             await asyncio.sleep(0.35)
@@ -160,14 +207,86 @@ class RunManager:
             run.progress = float(extra["progress"])
         run.message = message
         event = {
-            "sequence": len(run.events),
+            "sequence": self._next_sequence,
             "type": event_type,
             "run_id": run.id,
             "timestamp": _now(),
             "message": message,
             **extra,
         }
+        self._next_sequence += 1
         run.events.append(event)
+        if len(run.events) > self._MAX_EVENTS_PER_RUN:
+            del run.events[: len(run.events) - self._MAX_EVENTS_PER_RUN]
+        self._events.append(event)
+        if len(self._events) > self._MAX_GLOBAL_EVENTS:
+            del self._events[: len(self._events) - self._MAX_GLOBAL_EVENTS]
+        self._persist_run(run)
+
+    @staticmethod
+    def _write_json(path: Path, value: dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(prefix=path.name, suffix=".tmp", dir=path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(value, stream, indent=2, ensure_ascii=False)
+            os.replace(temporary, path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+    def _run_dir(self, run_id: str) -> Path:
+        return self.runs_dir / run_id
+
+    def _persist_run(self, run: RunState) -> None:
+        self._write_json(self._run_dir(run.id) / "run.json", run.record())
+
+    def _persist_workflow(self, run: RunState) -> None:
+        if run.workflow_snapshot is not None:
+            self._write_json(self._run_dir(run.id) / "workflow.json", run.workflow_snapshot)
+
+    def _load_runs(self) -> None:
+        if not self.runs_dir.exists():
+            return
+        loaded_events: list[dict[str, Any]] = []
+        for state_path in self.runs_dir.glob("*/run.json"):
+            try:
+                value = json.loads(state_path.read_text(encoding="utf-8"))
+                workflow_path = state_path.with_name("workflow.json")
+                workflow_snapshot = (
+                    json.loads(workflow_path.read_text(encoding="utf-8")) if workflow_path.is_file() else None
+                )
+                run = RunState(
+                    id=str(value["id"]),
+                    workflow_id=str(value.get("workflow_id", "")),
+                    workflow_name=str(value.get("workflow_name", value.get("workflow_id", "Untitled workflow"))),
+                    status=str(value.get("status", "failed")),
+                    progress=float(value.get("progress", 0.0)),
+                    message=str(value.get("message", "")),
+                    created_at=str(value.get("created_at", _now())),
+                    started_at=value.get("started_at"),
+                    finished_at=value.get("finished_at"),
+                    error=value.get("error"),
+                    outputs=[str(item) for item in value.get("outputs", [])],
+                    events=[event for event in value.get("events", []) if isinstance(event, dict)],
+                    workflow_snapshot=workflow_snapshot,
+                )
+            except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+                logging.getLogger("ai_cover.web").warning("Ignoring invalid run state: %s", state_path)
+                continue
+            self._runs[run.id] = run
+            loaded_events.extend(run.events)
+
+        self._runs = dict(sorted(self._runs.items(), key=lambda item: item[1].created_at))
+        loaded_events.sort(key=lambda event: int(event.get("sequence", 0)))
+        self._events = loaded_events[-self._MAX_GLOBAL_EVENTS :]
+        self._next_sequence = max((int(event.get("sequence", 0)) for event in self._events), default=0) + 1
+        for run in self._runs.values():
+            if run.status in self._ACTIVE_STATUSES:
+                run.status = "failed"
+                run.finished_at = _now()
+                run.error = "WebUI stopped before this run completed"
+                self._event(run, "failed", run.error, progress=run.progress, error=run.error)
 
     def _check_cancel(self, run: RunState) -> None:
         if run.cancel_event.is_set():
@@ -209,7 +328,7 @@ class RunManager:
         final_outputs: list[Path] = []
         order = topological_order(workflow)
         total = max(len(order), 1)
-        run_dir = RUNS_DIR / run.id
+        run_dir = self._run_dir(run.id)
         run_dir.mkdir(parents=True, exist_ok=True)
 
         for index, node_id in enumerate(order):

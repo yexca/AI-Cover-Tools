@@ -95,5 +95,12 @@ Existing result dataclasses:
 - Tools write under user-selected paths or tool-specific folders under `outputs`.
 - GUI-generated separation config is written to `user_data/gui_separate_config.py`.
 - WebUI model metadata is cached in `user_data/model_registry.json`.
-- WebUI workflows are stored in `user_data/web_workflows.json`.
-- WebUI intermediate separator output is written under `user_data/web_runs/<run-id>`; output nodes copy or convert final artifacts into their configured folders.
+- WebUI workflows are stored as independent revisioned files under `user_data/workflows`; `user_data/web_workflows.json` is only a retained migration source.
+- Each WebUI run owns `user_data/web_runs/<run-id>/run.json`, an immutable `workflow.json` snapshot, and node-specific intermediate output. Output nodes copy or convert final artifacts into their configured folders.
+
+## WebUI State Ownership
+
+- The server workflow store is authoritative for saved workflow revisions. A client must send the revision it loaded, and stale updates fail with `409` instead of overwriting a newer save.
+- The browser editor owns open tabs, per-tab undo history and transforms, and bounded recoverable drafts for unsaved changes.
+- `RunManager` is authoritative for queue and history state. Run records survive a server restart; runs interrupted by shutdown are restored as failed.
+- The frontend obtains a `/api/runs` snapshot at startup and reduces `/api/events/runs` events into it. Active run presentation is selected by the active workflow ID, so switching tabs does not transfer run ownership.

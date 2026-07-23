@@ -12,9 +12,12 @@
   const deepClone = value => JSON.parse(JSON.stringify(value));
   const ACTIVE_RUN_STATUSES = new Set(['queued', 'running', 'cancelling']);
   const TERMINAL_RUN_STATUSES = new Set(['completed', 'complete', 'success', 'done', 'failed', 'error', 'cancelled', 'canceled']);
-  const AUTOSAVE_KEY = 'audioflow:autosave';
-  const AUTOSAVE_DIRTY_KEY = 'audioflow:autosave-dirty';
-  const ACTIVE_RUN_KEY = 'audioflow:active-run-id';
+  const LEGACY_AUTOSAVE_KEY = 'audioflow:autosave';
+  const LEGACY_AUTOSAVE_DIRTY_KEY = 'audioflow:autosave-dirty';
+  const DRAFT_INDEX_KEY = 'audioflow:draft-index-v2';
+  const DRAFT_KEY_PREFIX = 'audioflow:draft-v2:';
+  const TAB_STATE_KEY = 'audioflow:workflow-tabs-v2';
+  const MAX_DRAFTS = 20;
 
   const refs = {
     viewport: $('#viewport'), world: $('#world'), nodes: $('#nodesLayer'), svg: $('#connectionsSvg'),
@@ -22,7 +25,7 @@
     empty: $('#emptyCanvas'), minimap: $('#minimap canvas'), log: $('#activityLog'),
     progress: $('#runProgress'), progressBar: $('#runProgressBar'), activityState: $('#activityState'),
     workflowName: $('#workflowName'), canvasTitle: $('#canvasTitle'), zoomLabel: $('#zoomReset'),
-    workflowList: $('#workflowList'), runList: $('#runList'), activeRunCount: $('#activeRunCount')
+    workflowList: $('#workflowList'), workflowTabs: $('#workflowTabs'), runList: $('#runList'), activeRunCount: $('#activeRunCount')
   };
 
   const palette = {
@@ -53,10 +56,11 @@
     workflow: { id: uid('workflow'), name: t('workflow.defaultName'), nodes: [], edges: [] },
     models: [], selectedNode: null, selectedEdge: null, pendingPort: null, connectionDrag: null,
     transform: { x: 0, y: 0, scale: 1 }, panning: null, dragging: null,
-    history: [], historyIndex: -1, running: false, validating: false, cancelling: false, runId: null, runStatus: null, eventSource: null,
+    history: [], historyIndex: -1, running: false, validatingWorkflowIds: new Set(), cancelling: false, runId: null, runStatus: null, eventSource: null, runRefreshTimer: null,
     validation: { nodeErrors: {}, edgeErrors: {}, globalErrors: [], errors: [] },
     activityCollapsed: false, dirty: false, modelCacheUsed: false, modelServiceUnavailable: false,
-    workflows: [], serverWorkflowIds: new Set(), workflowSavePending: false, runs: []
+    workflows: [], workflowSavePending: false, runs: [],
+    editors: new Map(), openWorkflowIds: [], activeWorkflowId: null
   };
 
   function normalizeOutputs(raw) {
@@ -115,6 +119,7 @@
       const detail = data.detail || data.error || data.message;
       const message = typeof detail === 'string' ? detail : detail?.message || (detail?.errors ? detail.errors.join('; ') : detail ? JSON.stringify(detail) : t('error.http', { status:response.status, statusText:response.statusText }));
       const error = new Error(message);
+      error.status = response.status;
       error.code = data?.error?.code || data?.detail?.error?.code || null;
       error.payload = data;
       throw error;
@@ -149,6 +154,160 @@
 
   function closeManager(id) {
     $(`#${CSS.escape(id)}`)?.classList.add('hidden');
+  }
+
+  function draftStorageKey(id) {
+    return `${DRAFT_KEY_PREFIX}${encodeURIComponent(id)}`;
+  }
+
+  function readDraftIndex() {
+    try {
+      const value = JSON.parse(localStorage.getItem(DRAFT_INDEX_KEY) || '[]');
+      return Array.isArray(value) ? value.filter(item => item && typeof item.id === 'string') : [];
+    } catch { return []; }
+  }
+
+  function writeDraftIndex(index) {
+    try { localStorage.setItem(DRAFT_INDEX_KEY, JSON.stringify(index)); } catch { /* storage may be unavailable */ }
+  }
+
+  function readDraft(id) {
+    try {
+      const value = JSON.parse(localStorage.getItem(draftStorageKey(id)) || 'null');
+      return value && value.workflow?.id === id ? value : null;
+    } catch { return null; }
+  }
+
+  function removeDraft(id) {
+    try { localStorage.removeItem(draftStorageKey(id)); } catch { /* storage may be unavailable */ }
+    writeDraftIndex(readDraftIndex().filter(item => item.id !== id));
+  }
+
+  function writeDraft(record) {
+    let index = readDraftIndex().filter(item => item.id !== record.workflow.id);
+    const entry = { id:record.workflow.id, name:record.workflow.name, updatedAt:record.updatedAt };
+    index.push(entry);
+    while (index.length > MAX_DRAFTS) {
+      const evicted = index.shift();
+      if (evicted?.id !== record.workflow.id) {
+        try { localStorage.removeItem(draftStorageKey(evicted.id)); } catch { /* storage may be unavailable */ }
+      }
+    }
+    try {
+      localStorage.setItem(draftStorageKey(record.workflow.id), JSON.stringify(record));
+      writeDraftIndex(index);
+      return true;
+    } catch {
+      while (index.length > 1) {
+        const evicted = index.shift();
+        try {
+          localStorage.removeItem(draftStorageKey(evicted.id));
+          localStorage.setItem(draftStorageKey(record.workflow.id), JSON.stringify(record));
+          writeDraftIndex(index);
+          return true;
+        } catch { /* keep evicting old drafts */ }
+      }
+      return false;
+    }
+  }
+
+  function persistTabState() {
+    try {
+      sessionStorage.setItem(TAB_STATE_KEY, JSON.stringify({
+        openIds:state.openWorkflowIds,
+        activeId:state.activeWorkflowId
+      }));
+    } catch { /* storage may be unavailable */ }
+  }
+
+  function readTabState() {
+    try {
+      const value = JSON.parse(sessionStorage.getItem(TAB_STATE_KEY) || 'null');
+      return value && Array.isArray(value.openIds) ? value : null;
+    } catch { return null; }
+  }
+
+  function captureActiveEditor() {
+    const editor = state.editors.get(state.activeWorkflowId);
+    if (!editor) return;
+    editor.workflow = state.workflow;
+    editor.history = state.history;
+    editor.historyIndex = state.historyIndex;
+    editor.dirty = state.dirty;
+    editor.transform = {...state.transform};
+  }
+
+  function registerEditor(workflow, { dirty = true, persisted = Number(workflow.revision || 0) > 0 } = {}) {
+    workflow.revision = Number(workflow.revision || 0);
+    const editor = {
+      workflow,
+      history:[JSON.stringify(workflow)],
+      historyIndex:0,
+      dirty:Boolean(dirty),
+      persisted:Boolean(persisted),
+      transform:{x:0,y:0,scale:1}
+    };
+    state.editors.set(workflow.id, editor);
+    if (!state.openWorkflowIds.includes(workflow.id)) state.openWorkflowIds.push(workflow.id);
+    return editor;
+  }
+
+  function renderWorkflowTabs() {
+    refs.workflowTabs.innerHTML = state.openWorkflowIds.map(id => {
+      const editor = state.editors.get(id);
+      if (!editor) return '';
+      const activeRun = state.runs.some(run => run.workflow_id === id && ACTIVE_RUN_STATUSES.has(normalizeRunStatus(run.status)));
+      const classes = [id === state.activeWorkflowId ? 'active' : '', editor.dirty ? 'dirty' : '', activeRun ? 'running' : ''].filter(Boolean).join(' ');
+      return `<div class="workflow-tab ${classes}" role="tab" aria-selected="${id === state.activeWorkflowId}" data-workflow-tab="${escapeHtml(id)}"><span class="workflow-tab-state"></span><button class="workflow-tab-label" data-activate-workflow="${escapeHtml(id)}" title="${escapeHtml(editor.workflow.name)}">${escapeHtml(editor.workflow.name)}</button><button class="workflow-tab-close" data-close-workflow="${escapeHtml(id)}" title="${escapeHtml(t('workflow.tabs.close'))}">×</button></div>`;
+    }).join('');
+    $$('[data-activate-workflow]', refs.workflowTabs).forEach(button => button.addEventListener('click', () => activateWorkflowEditor(button.dataset.activateWorkflow)));
+    $$('[data-close-workflow]', refs.workflowTabs).forEach(button => button.addEventListener('click', event => { event.stopPropagation();closeWorkflowEditor(button.dataset.closeWorkflow); }));
+  }
+
+  function activateWorkflowEditor(id, { fit = false } = {}) {
+    const editor = state.editors.get(id);
+    if (!editor) return false;
+    flushActiveInspectorField();
+    captureActiveEditor();
+    resetGraphInteractions();
+    state.activeWorkflowId = id;
+    state.workflow = editor.workflow;
+    state.history = editor.history;
+    state.historyIndex = editor.historyIndex;
+    state.transform = {...editor.transform};
+    state.selectedNode = null;
+    state.selectedEdge = null;
+    clearValidation();
+    refs.workflowName.value = state.workflow.name;
+    refs.canvasTitle.textContent = state.workflow.name;
+    setDirty(editor.dirty);
+    applyTransform();
+    renderGraph();
+    if (fit) fitView();
+    persistTabState();
+    renderWorkflowTabs();
+    reconcileActiveWorkflowRun();
+    return true;
+  }
+
+  function closeWorkflowEditor(id) {
+    const editor = state.editors.get(id);
+    if (!editor) return;
+    if (editor.dirty && !confirm(t('workflow.confirm.close', { name:editor.workflow.name }))) return;
+    const index = state.openWorkflowIds.indexOf(id);
+    const wasActive = id === state.activeWorkflowId;
+    removeDraft(id);
+    state.editors.delete(id);
+    state.openWorkflowIds = state.openWorkflowIds.filter(item => item !== id);
+    if (wasActive) {
+      state.activeWorkflowId = null;
+      const nextId = state.openWorkflowIds[Math.min(index, state.openWorkflowIds.length - 1)];
+      if (nextId) activateWorkflowEditor(nextId);
+      else createNewWorkflow();
+    } else {
+      persistTabState();
+      renderWorkflowTabs();
+    }
   }
 
   function renderModelStatus() {
@@ -794,19 +953,36 @@
       delete node.data.config;
       return node;
     });
-    return { id:state.workflow.id, name:state.workflow.name, version:1, nodes, edges:deepClone(state.workflow.edges) };
+    return {
+      id:state.workflow.id,
+      name:state.workflow.name,
+      version:1,
+      revision:Number(state.workflow.revision || 0),
+      nodes,
+      edges:deepClone(state.workflow.edges)
+    };
   }
 
   function setDirty(value) {
     state.dirty = Boolean(value);
+    const editor = state.editors.get(state.activeWorkflowId);
+    if (editor) editor.dirty = state.dirty;
     const dot = $('.save-dot');
     dot.style.background = state.dirty ? '#f2ad5f' : 'var(--green)';
     dot.title = t(state.dirty ? 'workflow.status.dirty' : 'workflow.status.saved');
-    try { localStorage.setItem(AUTOSAVE_DIRTY_KEY, state.dirty ? '1' : '0'); } catch { /* storage may be unavailable */ }
+    renderWorkflowTabs();
   }
 
   function persistAutosave(payload = workflowPayload()) {
-    try { localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(payload)); } catch { /* storage may be unavailable */ }
+    const editor = state.editors.get(state.activeWorkflowId);
+    if (!editor) return;
+    editor.workflow = state.workflow;
+    editor.history = state.history;
+    editor.historyIndex = state.historyIndex;
+    editor.dirty = state.dirty;
+    if (!state.dirty && editor.persisted) removeDraft(payload.id);
+    else writeDraft({ workflow:payload, dirty:state.dirty, persisted:editor.persisted, updatedAt:Date.now() });
+    persistTabState();
   }
 
   function commit(reason) {
@@ -839,8 +1015,8 @@
     }
     const payload = workflowPayload();
     payload.name = name;
-    if (asCopy) payload.id = uid('workflow');
-    const exists = !asCopy && state.serverWorkflowIds.has(payload.id);
+    if (asCopy) { payload.id = uid('workflow');payload.revision = 0; }
+    const exists = !asCopy && payload.revision > 0;
     const path = exists ? `/api/workflows/${encodeURIComponent(payload.id)}` : '/api/workflows';
     const method = exists ? 'PUT' : 'POST';
     state.workflowSavePending = true;
@@ -848,11 +1024,23 @@
     $('#saveAsWorkflow').disabled = true;
     try {
       const saved = await api(path, { method, body:JSON.stringify(payload) });
+      const previousId = state.activeWorkflowId;
       state.workflow.id = saved.id;
       state.workflow.name = saved.name;
+      state.workflow.revision = saved.revision;
+      state.workflow.updated_at = saved.updated_at;
+      if (previousId !== saved.id) {
+        const editor = state.editors.get(previousId);
+        state.editors.delete(previousId);
+        state.openWorkflowIds = state.openWorkflowIds.map(id => id === previousId ? saved.id : id);
+        state.activeWorkflowId = saved.id;
+        if (editor) state.editors.set(saved.id, editor);
+        removeDraft(previousId);
+      }
       refs.workflowName.value = saved.name;
       refs.canvasTitle.textContent = saved.name;
-      state.serverWorkflowIds.add(saved.id);
+      const editor = state.editors.get(saved.id);
+      if (editor) { editor.workflow = state.workflow;editor.persisted = true; }
       state.history = [JSON.stringify(state.workflow)];
       state.historyIndex = 0;
       setDirty(false);
@@ -862,8 +1050,9 @@
       await fetchWorkflows({ quiet:true });
     } catch (error) {
       persistAutosave();
-      toast(t('workflow.message.saveFailed', { error:error.message }), 'error');
-      log(t('workflow.message.saveFailed', { error:error.message }), 'error');
+      const key = error.status === 409 ? 'workflow.message.saveConflict' : 'workflow.message.saveFailed';
+      toast(t(key, { error:error.message }), 'error');
+      log(t(key, { error:error.message }), 'error');
     } finally {
       state.workflowSavePending = false;
       $('#saveWorkflow').disabled = false;
@@ -883,11 +1072,9 @@
     toast(t('workflow.message.exported'),'success');
   }
 
-  function loadWorkflowData(source, { dirty = true, notify = true } = {}) {
+  function loadWorkflowData(source, { dirty = true, notify = true, activate = true } = {}) {
     const payload = deepClone(source);
     if(!payload||!Array.isArray(payload.nodes)||!Array.isArray(payload.edges))throw new Error(t('workflow.message.invalid'));
-    flushActiveInspectorField();
-    resetGraphInteractions();
     payload.nodes.forEach((node,i)=>{
       node.data=node.data||{};node.data.x=Number(node.data.x ?? node.position?.x ?? 80+i*260);node.data.y=Number(node.data.y ?? node.position?.y ?? 100);
       if (node.data.title_customized === undefined) node.data.title_customized = node.type === 'separator' || Boolean(node.data.title && !isLocalizedDefaultTitle(node));
@@ -903,18 +1090,33 @@
       if (node.type === 'output_folder') { node.data.config = {path:node.data.path || '',naming:node.data.naming_template || '{basename}_{stem}.{ext}',format:node.data.format || 'wav',conflict:node.data.conflict || 'rename',...node.data.config}; node.data.config.path = String(node.data.config.path ?? '').trim(); }
     });
     payload.edges.forEach(edge => { edge.id ||= uid('edge'); });
-    state.workflow={id:payload.id||uid('workflow'),name:payload.name||t('workflow.loadedName'),nodes:payload.nodes,edges:payload.edges};state.selectedNode=null;state.selectedEdge=null;
-    state.history=[JSON.stringify(state.workflow)];state.historyIndex=0;setDirty(dirty);persistAutosave();renderGraph();fitView();
+    let id = payload.id || uid('workflow');
+    const idChanged = state.editors.has(id);
+    if (idChanged) id = uid('workflow');
+    const workflow={
+      id,
+      name:payload.name||t('workflow.loadedName'),
+      version:Number(payload.version || 1),
+      revision:idChanged ? 0 : Number(payload.revision || 0),
+      updated_at:payload.updated_at,
+      nodes:payload.nodes,
+      edges:payload.edges
+    };
+    registerEditor(workflow, { dirty, persisted:workflow.revision > 0 });
+    if (activate) {
+      activateWorkflowEditor(workflow.id, { fit:true });
+      persistAutosave();
+    }
     if (notify) toast(t('workflow.message.loaded'),'success');
+    return workflow.id;
   }
 
   function createNewWorkflow() {
     flushActiveInspectorField();
-    if(state.dirty&&!confirm(t('workflow.confirm.discard')))return;
-    resetGraphInteractions();
-    state.workflow={id:uid('workflow'),name:t('workflow.untitled'),nodes:[],edges:[]};
-    state.selectedNode=null;state.selectedEdge=null;state.history=[JSON.stringify(state.workflow)];state.historyIndex=0;
-    setDirty(true);persistAutosave();renderGraph();
+    const workflow={id:uid('workflow'),name:t('workflow.untitled'),version:1,revision:0,nodes:[],edges:[]};
+    registerEditor(workflow, { dirty:true, persisted:false });
+    activateWorkflowEditor(workflow.id);
+    persistAutosave();
   }
 
   function renderWorkflowList() {
@@ -938,8 +1140,8 @@
     try {
       const result = await api('/api/workflows');
       state.workflows = Array.isArray(result.workflows) ? result.workflows : [];
-      state.serverWorkflowIds = new Set(state.workflows.map(item => item.id));
       renderWorkflowList();
+      renderWorkflowTabs();
       return state.workflows;
     } catch (error) {
       if (!quiet) refs.workflowList.innerHTML = `<div class="manager-empty">${escapeHtml(t('workflow.message.listFailed', { error:error.message }))}</div>`;
@@ -948,11 +1150,14 @@
   }
 
   async function openServerWorkflow(id) {
-    if (state.dirty && !confirm(t('workflow.confirm.switch'))) return;
+    if (state.editors.has(id)) {
+      activateWorkflowEditor(id);
+      closeManager('workflowManager');
+      return;
+    }
     try {
       const workflow = await api(`/api/workflows/${encodeURIComponent(id)}`);
       loadWorkflowData(workflow, { dirty:false });
-      state.serverWorkflowIds.add(workflow.id);
       closeManager('workflowManager');
     } catch (error) { toast(t('workflow.message.openFailed', { error:error.message }), 'error'); }
   }
@@ -962,10 +1167,22 @@
     if (!confirm(t('workflow.confirm.delete', { name:item?.name || id }))) return;
     try {
       await api(`/api/workflows/${encodeURIComponent(id)}`, { method:'DELETE' });
-      state.serverWorkflowIds.delete(id);
       state.workflows = state.workflows.filter(workflow => workflow.id !== id);
-      if (state.workflow.id === id) { setDirty(true); persistAutosave(); }
+      const editor = state.editors.get(id);
+      if (editor) {
+        editor.persisted = false;
+        editor.dirty = true;
+        editor.workflow.revision = 0;
+        if (state.activeWorkflowId === id) {
+          state.workflow.revision = 0;
+          setDirty(true);
+          persistAutosave();
+        } else {
+          writeDraft({workflow:deepClone(editor.workflow),dirty:true,persisted:false,updatedAt:Date.now()});
+        }
+      }
       renderWorkflowList();
+      renderWorkflowTabs();
       toast(t('workflow.message.deleted'), 'success');
     } catch (error) { toast(t('workflow.message.deleteFailed', { error:error.message }), 'error'); }
   }
@@ -1032,44 +1249,51 @@
     toast(plural('validation.issueCount', errors.length), 'error');
   }
 
-  async function validateBeforeRun(payload) {
+  async function validateBeforeRun(payload, workflowId) {
     const result = await api('/api/workflows/validate', { method:'POST', body:JSON.stringify(payload) });
-    if (!result.valid) { applyValidation(result); return false; }
-    clearValidation();
+    if (!result.valid) {
+      if (state.activeWorkflowId === workflowId) applyValidation(result);
+      else toast(plural('validation.issueCount', Array.isArray(result.errors) ? result.errors.length : 1), 'error');
+      return false;
+    }
+    if (state.activeWorkflowId === workflowId) clearValidation();
     return true;
   }
 
   async function runWorkflow() {
-    if(state.running||state.validating)return;
+    const workflowId = state.activeWorkflowId;
+    if(!workflowId||state.running||state.validatingWorkflowIds.has(workflowId))return;
     if(!state.workflow.nodes.length){toast(t('workflow.message.noNodes'),'error');return;}
     state.workflow.name=refs.workflowName.value.trim()||state.workflow.name;
     const payload = workflowPayload();
-    state.validating=true;renderRunControls();
+    state.validatingWorkflowIds.add(workflowId);renderRunControls();renderWorkflowTabs();
     try {
       log(t('validation.checking'));
-      if (!await validateBeforeRun(payload)) return;
-      state.running=true;state.cancelling=false;state.runStatus='queued';
-      renderRunControls();refs.activityState.className='activity-state running';refs.progress.classList.remove('hidden');refs.progressBar.style.width='3%';
-      log(t('run.message.start', { name:state.workflow.name }));
+      if (!await validateBeforeRun(payload, workflowId)) return;
+      log(t('run.message.start', { name:payload.name }));
       const result=await api('/api/runs',{method:'POST',body:JSON.stringify({workflow:payload})});
-      state.runId=result.id||result.run_id||result.task_id;if(!state.runId)throw new Error(t('run.message.idMissing'));
-      try { localStorage.setItem(ACTIVE_RUN_KEY, state.runId); } catch { /* storage may be unavailable */ }
-      log(t('run.message.created', { id:state.runId }));subscribeRun(state.runId);fetchRuns({ quiet:true });
+      const runId=result.id||result.run_id||result.task_id;if(!runId)throw new Error(t('run.message.idMissing'));
+      const run = {...result,id:runId,workflow_id:result.workflow_id||workflowId,workflow_name:result.workflow_name||payload.name,status:result.status||'queued'};
+      upsertRun(run);
+      if (state.activeWorkflowId === workflowId) attachRun(run);
+      log(t('run.message.created', { id:runId }));
+      renderRunList();renderWorkflowTabs();scheduleRunsRefresh();
     } catch(error){
-      if (state.running) finishRun('failed',error.message);
-      else { toast(t('validation.checkFailed', { error:error.message }), 'error'); log(t('validation.checkFailed', { error:error.message }), 'error'); }
+      toast(t('validation.checkFailed', { error:error.message }), 'error');
+      log(t('validation.checkFailed', { error:error.message }), 'error');
     } finally {
-      state.validating=false;
-      if (!state.running) renderRunControls();
+      state.validatingWorkflowIds.delete(workflowId);
+      renderRunControls();renderWorkflowTabs();
     }
   }
 
   function renderRunControls() {
+    const validating = state.validatingWorkflowIds.has(state.activeWorkflowId);
     const button = $('#runWorkflow');
-    button.classList.toggle('running', state.running || state.validating);
-    button.disabled = state.running || state.validating;
-    const key = state.validating ? 'validation.checkingShort' : state.running ? 'workflow.action.running' : 'workflow.action.run';
-    button.innerHTML = `<span>${state.running || state.validating ? '◌' : '▶'}</span> <span>${escapeHtml(t(key))}</span>`;
+    button.classList.toggle('running', state.running || validating);
+    button.disabled = state.running || validating;
+    const key = validating ? 'validation.checkingShort' : state.running ? 'workflow.action.running' : 'workflow.action.run';
+    button.innerHTML = `<span>${state.running || validating ? '◌' : '▶'}</span> <span>${escapeHtml(t(key))}</span>`;
     const cancel = $('#cancelRun');
     cancel.classList.toggle('hidden', !state.running);
     cancel.disabled = state.cancelling;
@@ -1085,16 +1309,72 @@
     return status;
   }
 
-  function subscribeRun(id) {
-    if(state.eventSource)state.eventSource.close();
-    const source=new EventSource(`/api/runs/${encodeURIComponent(id)}/events`);state.eventSource=source;
-    source.onmessage=event=>{try{handleRunEvent(JSON.parse(event.data));}catch{log(event.data);}};
-    ['queued','started','cancelling','node_started','node_completed','file_started','file_completed','progress','completed','failed','cancelled'].forEach(type => source.addEventListener(type,event=>{try{handleRunEvent({...JSON.parse(event.data),type});}catch{log(event.data);}}));
-    source.addEventListener('log',event=>{try{handleRunEvent(JSON.parse(event.data));}catch{log(event.data);}});
-    source.onerror=()=>{source.close();if(state.running&&state.runId===id)pollRun(id);};
+  function statusFromRunEvent(event, currentStatus = '') {
+    const raw = String(event.status || event.type || '').toLowerCase();
+    const normalized = normalizeRunStatus(raw);
+    if (ACTIVE_RUN_STATUSES.has(normalized) || TERMINAL_RUN_STATUSES.has(normalized)) return normalized;
+    if (['node_started','node_completed','file_started','file_completed','progress','log'].includes(raw)) {
+      return normalizeRunStatus(currentStatus) === 'queued' ? 'running' : normalizeRunStatus(currentStatus);
+    }
+    return normalizeRunStatus(currentStatus);
   }
-  async function pollRun(id) {
-    while(state.running&&state.runId===id){try{const result=await api(`/api/runs/${encodeURIComponent(id)}`);handleRunEvent(result);if(TERMINAL_RUN_STATUSES.has(String(result.status).toLowerCase()))return;}catch(error){log(t('run.message.statusFailed', { error:error.message }),'error');}await new Promise(r=>setTimeout(r,1200));}
+
+  function upsertRun(value) {
+    const id = value?.id || value?.run_id;
+    if (!id) return null;
+    const index = state.runs.findIndex(run => run.id === id);
+    const current = index >= 0 ? state.runs[index] : {};
+    const next = {...current,...value,id};
+    next.status = statusFromRunEvent(value, current.status || next.status) || 'queued';
+    if (index >= 0) state.runs.splice(index, 1, next);
+    else state.runs.unshift(next);
+    return next;
+  }
+
+  function applyGlobalRunEvent(event) {
+    const id = event?.run_id || event?.id;
+    if (!id) return;
+    const existing = state.runs.find(run => run.id === id);
+    if (!existing) {
+      const status = statusFromRunEvent(event);
+      if (ACTIVE_RUN_STATUSES.has(status)) scheduleRunsRefresh(80);
+      return;
+    }
+    const patch = {
+      id,
+      status:statusFromRunEvent(event, existing.status),
+      message:event.message ?? existing.message,
+      progress:event.progress ?? existing.progress,
+      error:event.error ?? existing.error,
+      outputs:event.outputs ?? existing.outputs
+    };
+    const run = upsertRun(patch);
+    if (id === state.runId) handleRunEvent(event);
+    renderRunList();renderWorkflowTabs();
+    reconcileActiveWorkflowRun();
+    if (run && (run.status === 'queued' || TERMINAL_RUN_STATUSES.has(run.status))) scheduleRunsRefresh();
+  }
+
+  function connectRunEvents() {
+    if (typeof EventSource === 'undefined') return;
+    if (state.eventSource) state.eventSource.close();
+    const source = new EventSource('/api/events/runs');
+    state.eventSource = source;
+    source.onopen = () => fetchRuns({ quiet:true });
+    source.onmessage = message => {
+      try { applyGlobalRunEvent(JSON.parse(message.data)); }
+      catch { log(message.data); }
+    };
+    // EventSource reconnects automatically and carries Last-Event-ID.
+    source.onerror = () => scheduleRunsRefresh(500);
+  }
+
+  function scheduleRunsRefresh(delay = 250) {
+    if (state.runRefreshTimer) return;
+    state.runRefreshTimer = window.setTimeout(() => {
+      state.runRefreshTimer = null;
+      fetchRuns({ quiet:true });
+    }, delay);
   }
 
   function localizedRunEvent(event, status) {
@@ -1126,11 +1406,9 @@
     if(status==='cancelled')finishRun('cancelled',t('run.message.cancelled'));
   }
   function finishRun(status,message) {
-    const finishedId = state.runId;
-    state.running=false;state.cancelling=false;state.runStatus=status;if(state.eventSource){state.eventSource.close();state.eventSource=null;}renderRunControls();$$('.node.running').forEach(n=>n.classList.remove('running'));
+    state.running=false;state.cancelling=false;state.runStatus=status;renderRunControls();$$('.node.running').forEach(n=>n.classList.remove('running'));
     refs.activityState.className=`activity-state ${status==='success'?'success':status==='failed'?'error':''}`;refs.progressBar.style.width=status==='success'?'100%':'0';log(message,status==='success'?'success':status==='failed'?'error':'muted');toast(message,status==='success'?'success':status==='failed'?'error':'');state.runId=null;
-    try { if (localStorage.getItem(ACTIVE_RUN_KEY) === finishedId) localStorage.removeItem(ACTIVE_RUN_KEY); } catch { /* storage may be unavailable */ }
-    fetchRuns({ quiet:true });
+    scheduleRunsRefresh();
   }
 
   function renderRunSummary() {
@@ -1167,7 +1445,7 @@
     try {
       const result = await api('/api/runs');
       state.runs = Array.isArray(result.runs) ? result.runs : [];
-      renderRunList();
+      renderRunList();renderWorkflowTabs();reconcileActiveWorkflowRun();
       return state.runs;
     } catch (error) {
       if (!quiet) refs.runList.innerHTML = `<div class="manager-empty">${escapeHtml(t('run.message.listFailed', { error:error.message }))}</div>`;
@@ -1178,19 +1456,39 @@
   function attachRun(run, recovered = false) {
     const status = normalizeRunStatus(run.status);
     if (!ACTIVE_RUN_STATUSES.has(status)) return;
-    if (state.eventSource) state.eventSource.close();
-    state.runId = run.id;state.running = true;state.validating = false;state.runStatus = status;state.cancelling = status === 'cancelling';
-    try { localStorage.setItem(ACTIVE_RUN_KEY, run.id); } catch { /* storage may be unavailable */ }
+    state.runId = run.id;state.running = true;state.runStatus = status;state.cancelling = status === 'cancelling';
     refs.activityState.className='activity-state running';refs.progress.classList.remove('hidden');
     const progress=Number(run.progress || 0);refs.progressBar.style.width=`${progress<=1?progress*100:progress}%`;
     renderRunControls();
     if (recovered) log(t('run.message.recovered', { name:run.workflow_name || run.workflow_id }), 'success');
-    subscribeRun(run.id);
+  }
+
+  function detachRun() {
+    state.runId=null;state.running=false;state.cancelling=false;state.runStatus=null;
+    refs.activityState.className='activity-state';refs.progress.classList.add('hidden');refs.progressBar.style.width='0';
+    $$('.node.running').forEach(node => node.classList.remove('running'));
+    renderRunControls();
+  }
+
+  function reconcileActiveWorkflowRun() {
+    if (!state.activeWorkflowId) return;
+    const tracked = state.runs.find(run => run.id === state.runId);
+    if (tracked && tracked.workflow_id === state.activeWorkflowId && TERMINAL_RUN_STATUSES.has(normalizeRunStatus(tracked.status))) {
+      handleRunEvent(tracked);
+      return;
+    }
+    const active = state.runs.find(run => run.workflow_id === state.activeWorkflowId && ['running','cancelling'].includes(normalizeRunStatus(run.status)))
+      || state.runs.find(run => run.workflow_id === state.activeWorkflowId && normalizeRunStatus(run.status) === 'queued');
+    if (active) {
+      if (active.id !== state.runId || !state.running) attachRun(active);
+    } else if (state.runId || state.running) detachRun();
   }
 
   async function trackRunById(id) {
     try {
       const run = await api(`/api/runs/${encodeURIComponent(id)}`);
+      if (state.editors.has(run.workflow_id)) activateWorkflowEditor(run.workflow_id);
+      else if (run.workflow) loadWorkflowData(run.workflow, { dirty:false, notify:false });
       attachRun(run, true);
       closeManager('runManager');
       renderRunList();
@@ -1199,12 +1497,10 @@
 
   async function recoverActiveRun() {
     await fetchRuns({ quiet:true });
-    let id = null;
-    try { id = localStorage.getItem(ACTIVE_RUN_KEY); } catch { /* storage may be unavailable */ }
-    if (!id) return;
-    const run = state.runs.find(item => item.id === id);
-    if (run && ACTIVE_RUN_STATUSES.has(normalizeRunStatus(run.status))) attachRun(run, true);
-    else try { localStorage.removeItem(ACTIVE_RUN_KEY); } catch { /* storage may be unavailable */ }
+    const run = state.runs.find(item => item.workflow_id === state.activeWorkflowId && ['running','cancelling'].includes(normalizeRunStatus(item.status)))
+      || state.runs.find(item => item.workflow_id === state.activeWorkflowId && normalizeRunStatus(item.status) === 'queued');
+    if (run) attachRun(run, true);
+    else detachRun();
   }
 
   async function requestRunCancel(id) {
@@ -1338,7 +1634,7 @@
     $('#saveAsWorkflow').addEventListener('click',saveWorkflowAs);
     $('#exportWorkflow').addEventListener('click',exportWorkflow);
     $('#importWorkflow').addEventListener('click',()=>$('#workflowFile').click());
-    $('#workflowFile').addEventListener('change',async event=>{try{const file=event.target.files[0];if(file&&(!state.dirty||confirm(t('workflow.confirm.switch')))){loadWorkflowData(JSON.parse(await file.text()));closeManager('workflowManager');}}catch(error){toast(t('workflow.message.loadFailed', { error:error.message }),'error');}event.target.value='';});
+    $('#workflowFile').addEventListener('change',async event=>{try{const file=event.target.files[0];if(file){const payload=JSON.parse(await file.text());payload.revision=0;payload.id=uid('workflow');loadWorkflowData(payload);closeManager('workflowManager');}}catch(error){toast(t('workflow.message.loadFailed', { error:error.message }),'error');}event.target.value='';});
     $('#manageRuns').addEventListener('click',()=>{showManager('runManager');fetchRuns();});
     $('#refreshRuns').addEventListener('click',()=>fetchRuns());
     $$('.manager-close').forEach(button=>button.addEventListener('click',()=>closeManager(button.dataset.closeManager)));
@@ -1357,6 +1653,7 @@
     renderRunControls();
     renderModelStatus();
     setDirty(state.dirty);
+    renderWorkflowTabs();
     renderWorkflowList();
     renderRunList();
     if (state.pendingPort) {
@@ -1366,13 +1663,63 @@
     }
   }
 
-  function initWorkflow() {
-    let saved = null, dirty = false;
-    try { saved=localStorage.getItem(AUTOSAVE_KEY);dirty=localStorage.getItem(AUTOSAVE_DIRTY_KEY)==='1'; } catch { /* storage may be unavailable */ }
-    if(saved){try{loadWorkflowData(JSON.parse(saved), { dirty, notify:false });return;}catch{/* ignore corrupt autosave */}}
-    const input=makeNode('input_folder',80,150), output=makeNode('output_folder',445,180);state.workflow.nodes=[input,output];state.history=[JSON.stringify(state.workflow)];state.historyIndex=0;setDirty(false);persistAutosave();renderGraph();
+  async function initWorkflow() {
+    await fetchWorkflows({ quiet:true });
+    let savedTabs = readTabState();
+    if (!savedTabs?.openIds?.length) {
+      const drafts = readDraftIndex();
+      const mostRecent = drafts.at(-1);
+      if (mostRecent) savedTabs = { openIds:drafts.map(item => item.id), activeId:mostRecent.id };
+    }
+
+    if (savedTabs?.openIds?.length) {
+      const catalogIds = new Set(state.workflows.map(item => item.id));
+      for (const id of [...new Set(savedTabs.openIds)]) {
+        const draft = readDraft(id);
+        try {
+          if (draft?.workflow) loadWorkflowData(draft.workflow, { dirty:Boolean(draft.dirty), notify:false, activate:false });
+          else if (catalogIds.has(id)) loadWorkflowData(await api(`/api/workflows/${encodeURIComponent(id)}`), { dirty:false, notify:false, activate:false });
+        } catch {
+          if (draft) removeDraft(id);
+        }
+      }
+      const activeId = state.editors.has(savedTabs.activeId) ? savedTabs.activeId : state.openWorkflowIds.at(-1);
+      if (activeId) {
+        activateWorkflowEditor(activeId, { fit:true });
+        return;
+      }
+    }
+
+    let legacySaved = null, legacyDirty = false;
+    try {
+      legacySaved=localStorage.getItem(LEGACY_AUTOSAVE_KEY);
+      legacyDirty=localStorage.getItem(LEGACY_AUTOSAVE_DIRTY_KEY)==='1';
+    } catch { /* storage may be unavailable */ }
+    if (legacySaved) {
+      try {
+        const id = loadWorkflowData(JSON.parse(legacySaved), { dirty:legacyDirty, notify:false });
+        try { localStorage.removeItem(LEGACY_AUTOSAVE_KEY);localStorage.removeItem(LEGACY_AUTOSAVE_DIRTY_KEY); } catch { /* storage may be unavailable */ }
+        if (id) return;
+      } catch { /* ignore corrupt legacy autosave */ }
+    }
+
+    const workflow={id:uid('workflow'),name:t('workflow.untitled'),version:1,revision:0,nodes:[],edges:[]};
+    state.workflow = workflow;
+    workflow.nodes=[makeNode('input_folder',80,150),makeNode('output_folder',445,180)];
+    registerEditor(workflow, { dirty:true, persisted:false });
+    activateWorkflowEditor(workflow.id, { fit:true });
+    persistAutosave();
   }
 
-  bindGlobalEvents();initWorkflow();applyTransform();renderRunControls();loadModels();fetchWorkflows({ quiet:true });recoverActiveRun();
-  window.setInterval(()=>{if(state.running||!$('#runManager').classList.contains('hidden'))fetchRuns({ quiet:true });},1800);
+  async function bootstrap() {
+    bindGlobalEvents();applyTransform();renderRunControls();loadModels();
+    await initWorkflow();
+    await recoverActiveRun();
+    connectRunEvents();
+  }
+
+  bootstrap();
+  window.setInterval(()=>{
+    if(state.runs.some(run=>ACTIVE_RUN_STATUSES.has(normalizeRunStatus(run.status)))||!$('#runManager').classList.contains('hidden'))fetchRuns({ quiet:true });
+  },8000);
 })();
