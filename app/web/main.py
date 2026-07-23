@@ -132,6 +132,11 @@ def create_app(
     def validate(workflow: Workflow) -> dict[str, Any]:
         return validate_workflow_detailed(workflow, model_registry)
 
+    @app.get("/api/runs")
+    def list_runs(limit: int = Query(default=100, ge=1, le=500)) -> dict[str, Any]:
+        values = runs.list(limit=limit)
+        return {"runs": values, "total": len(values)}
+
     @app.post("/api/runs", status_code=status.HTTP_202_ACCEPTED)
     def create_run(payload: RunRequest) -> dict[str, Any]:
         workflow = payload.workflow

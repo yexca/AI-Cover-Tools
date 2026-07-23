@@ -49,6 +49,16 @@ class I18nTests(unittest.TestCase):
         self.assertIn("return { id: item, label: item }", source)
         self.assertNotIn("id: item.toLowerCase().replace", source)
 
+    def test_frontend_exposes_workflow_and_run_management(self) -> None:
+        source = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+        index = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="workflowManager"', index)
+        self.assertIn('id="runManager"', index)
+        self.assertIn("async function fetchWorkflows", source)
+        self.assertIn("async function fetchRuns", source)
+        self.assertIn("async function recoverActiveRun", source)
+        self.assertIn("state.cancelling = lifecycleStatus === 'cancelling'", source)
+
 
 if __name__ == "__main__":
     unittest.main()

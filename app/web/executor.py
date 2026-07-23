@@ -42,6 +42,7 @@ class AudioArtifact:
 class RunState:
     id: str
     workflow_id: str
+    workflow_name: str
     status: str = "queued"
     progress: float = 0.0
     message: str = "Queued"
@@ -54,11 +55,13 @@ class RunState:
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
     future: Future[Any] | None = field(default=None, repr=False)
 
-    def public(self) -> dict[str, Any]:
+    def public(self, queue_position: int | None = None) -> dict[str, Any]:
         return {
             "id": self.id,
             "workflow_id": self.workflow_id,
+            "workflow_name": self.workflow_name,
             "status": self.status,
+            "queue_position": queue_position,
             "progress": self.progress,
             "message": self.message,
             "created_at": self.created_at,
@@ -83,17 +86,31 @@ class RunManager:
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="audio-web-workflow")
 
     def submit(self, workflow: Workflow) -> dict[str, Any]:
-        run = RunState(id=uuid4().hex, workflow_id=workflow.id)
+        run = RunState(id=uuid4().hex, workflow_id=workflow.id, workflow_name=workflow.name)
         with self._lock:
             self._runs[run.id] = run
             self._event(run, "queued", "Workflow queued", progress=0.0)
             run.future = self._pool.submit(self._execute, run, workflow)
-        return run.public()
+            positions = self._queue_positions()
+            return run.public(positions.get(run.id))
 
     def get(self, run_id: str) -> dict[str, Any] | None:
         with self._lock:
             run = self._runs.get(run_id)
-            return run.public() if run else None
+            if not run:
+                return None
+            positions = self._queue_positions()
+            return run.public(positions.get(run.id))
+
+    def list(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self._lock:
+            positions = self._queue_positions()
+            runs = list(self._runs.values())[-limit:]
+            return [run.public(positions.get(run.id)) for run in reversed(runs)]
+
+    def _queue_positions(self) -> dict[str, int]:
+        queued = (run for run in self._runs.values() if run.status == "queued")
+        return {run.id: index for index, run in enumerate(queued, start=1)}
 
     def cancel(self, run_id: str) -> dict[str, Any] | None:
         with self._lock:
@@ -109,8 +126,10 @@ class RunManager:
                 run.finished_at = _now()
                 self._event(run, "cancelled", "Workflow cancelled before it started", progress=run.progress)
             else:
+                run.status = "cancelling"
                 self._event(run, "cancelling", "Cancellation will take effect after the current model call", progress=run.progress)
-            return run.public()
+            positions = self._queue_positions()
+            return run.public(positions.get(run.id))
 
     async def events(self, run_id: str) -> AsyncIterator[str]:
         cursor = 0
@@ -157,6 +176,7 @@ class RunManager:
     def _execute(self, run: RunState, workflow: Workflow) -> None:
         try:
             with self._lock:
+                self._check_cancel(run)
                 run.status = "running"
                 run.started_at = _now()
                 self._event(run, "started", "Workflow started", progress=0.0)

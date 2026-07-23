@@ -76,6 +76,9 @@ Legacy editor node names such as `file_input`, `folder_input`, `model`, and `out
 - Pointer state is cleared on pointer up, cancellation, lost capture, window blur, node deletion, workflow load, new workflow, undo, and redo.
 - Canvas panning disables browser text selection and uses pointer capture.
 - Validation errors are mapped back to node and edge IDs and highlighted on the graph.
+- The Workflows dialog lists server-saved workflows and supports open, delete, save as, JSON import, and JSON export.
+- Save writes the current workflow to the local service. Export is a separate action and does not change saved state.
+- On mobile-width viewports, the node library becomes a left drawer so the canvas keeps the full viewport width.
 
 ## Model Registry and Refresh
 
@@ -168,14 +171,19 @@ Output templates may use:
 Conflict modes are `rename`, `overwrite`, and `skip`. Output paths are checked so naming templates cannot escape the selected output root.
 
 Cancellation is cooperative. It is checked between files and nodes; an active model call may need to finish before cancellation takes effect.
+The frontend keeps the run in a cancelling state until the server reports a terminal cancellation event.
+
+The Runs dialog shows the current single-worker queue and completed runs from the current server session. Active run IDs are retained in browser storage, allowing a page reload to reconnect to the run event stream. Any active run can also be selected from the run list for tracking or cancellation.
 
 ## Persistence
 
 Browser-local state:
 
 - `audioflow:autosave`: current workflow payload
+- `audioflow:autosave-dirty`: whether the browser draft differs from its last server save
 - `audioflow:model-cache`: last visible model list
 - `audioflow:locale`: locale preference
+- `audioflow:active-run-id`: run to reconnect after a page reload
 
 Server-local state:
 
@@ -183,7 +191,7 @@ Server-local state:
 - `user_data/web_workflows.json`: saved workflows
 - `user_data/web_runs/<run-id>/`: intermediate run output
 
-The API supports listing, loading, saving, updating, and deleting server workflows. The current Load button imports a local `.audioflow.json` file; a server workflow browser is not implemented yet.
+The Workflows dialog uses the server CRUD API for normal persistence. JSON import and export remain available as explicit portability actions. The browser autosave stores only the active draft; it does not replace the server workflow list.
 
 ## Internationalization
 
@@ -209,15 +217,15 @@ Do not translate user workflow names, custom node titles, filesystem paths, mode
 | `GET/PUT/DELETE` | `/api/workflows/{id}` | workflow CRUD |
 | `POST` | `/api/workflows/validate` | structured pre-run validation |
 | `POST` | `/api/runs` | queue a workflow |
+| `GET` | `/api/runs` | list current-session runs and queue positions |
 | `GET/DELETE` | `/api/runs/{id}` | inspect or cancel a run |
 | `GET` | `/api/runs/{id}/events` | SSE run events |
 
 ## Current Limitations
 
-- Server-saved workflows do not yet have a browser UI.
 - Models with uncertain function or outputs need an explicit metadata editor.
 - The executor visits every node in topological order; it does not yet prune nodes that cannot reach an output.
-- Run history is held in memory and is not restored after a server restart.
+- Run history survives browser reloads but remains in memory and is not restored after a server restart.
 - Advanced separator parameters are present in the backend but only a small subset is exposed in the inspector.
 - Multi-select, copy/paste, groups, comments, and reusable subgraphs are not implemented.
 

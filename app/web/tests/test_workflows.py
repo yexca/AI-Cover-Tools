@@ -20,6 +20,26 @@ class _Registry:
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_workflow_api_manages_multiple_saved_workflows(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            app = create_app(
+                ModelRegistry(root / "models", root / "registry.json"),
+                WorkflowStore(root / "workflows.json"),
+            )
+            with TestClient(app, client=("127.0.0.1", 50100)) as client:
+                first = client.post("/api/workflows", json={"id": "first", "name": "First"})
+                second = client.post("/api/workflows", json={"id": "second", "name": "Second"})
+                self.assertEqual(first.status_code, 201)
+                self.assertEqual(second.status_code, 201)
+                self.assertEqual({item["id"] for item in client.get("/api/workflows").json()["workflows"]}, {"first", "second"})
+
+                updated = client.put("/api/workflows/first", json={"id": "ignored", "name": "Renamed"})
+                self.assertEqual(updated.json()["id"], "first")
+                self.assertEqual(client.get("/api/workflows/first").json()["name"], "Renamed")
+                self.assertEqual(client.delete("/api/workflows/second").status_code, 200)
+                self.assertEqual([item["id"] for item in client.get("/api/workflows").json()["workflows"]], ["first"])
+
     def test_editor_payload_is_normalized_and_validated(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

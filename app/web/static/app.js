@@ -10,13 +10,19 @@
   const plural = (key, count, params) => i18n.plural(key, count, params);
   const now = () => i18n.formatTime();
   const deepClone = value => JSON.parse(JSON.stringify(value));
+  const ACTIVE_RUN_STATUSES = new Set(['queued', 'running', 'cancelling']);
+  const TERMINAL_RUN_STATUSES = new Set(['completed', 'complete', 'success', 'done', 'failed', 'error', 'cancelled', 'canceled']);
+  const AUTOSAVE_KEY = 'audioflow:autosave';
+  const AUTOSAVE_DIRTY_KEY = 'audioflow:autosave-dirty';
+  const ACTIVE_RUN_KEY = 'audioflow:active-run-id';
 
   const refs = {
     viewport: $('#viewport'), world: $('#world'), nodes: $('#nodesLayer'), svg: $('#connectionsSvg'),
     library: $('#nodeLibrary'), inspector: $('#inspectorContent'), hint: $('#connectionHint'),
     empty: $('#emptyCanvas'), minimap: $('#minimap canvas'), log: $('#activityLog'),
     progress: $('#runProgress'), progressBar: $('#runProgressBar'), activityState: $('#activityState'),
-    workflowName: $('#workflowName'), canvasTitle: $('#canvasTitle'), zoomLabel: $('#zoomReset')
+    workflowName: $('#workflowName'), canvasTitle: $('#canvasTitle'), zoomLabel: $('#zoomReset'),
+    workflowList: $('#workflowList'), runList: $('#runList'), activeRunCount: $('#activeRunCount')
   };
 
   const palette = {
@@ -47,9 +53,10 @@
     workflow: { id: uid('workflow'), name: t('workflow.defaultName'), nodes: [], edges: [] },
     models: [], selectedNode: null, selectedEdge: null, pendingPort: null, connectionDrag: null,
     transform: { x: 0, y: 0, scale: 1 }, panning: null, dragging: null,
-    history: [], historyIndex: -1, running: false, validating: false, runId: null, eventSource: null,
+    history: [], historyIndex: -1, running: false, validating: false, cancelling: false, runId: null, runStatus: null, eventSource: null,
     validation: { nodeErrors: {}, edgeErrors: {}, globalErrors: [], errors: [] },
-    activityCollapsed: false, dirty: false, modelCacheUsed: false, modelServiceUnavailable: false
+    activityCollapsed: false, dirty: false, modelCacheUsed: false, modelServiceUnavailable: false,
+    workflows: [], serverWorkflowIds: new Set(), workflowSavePending: false, runs: []
   };
 
   function normalizeOutputs(raw) {
@@ -129,6 +136,19 @@
     line.innerHTML = `<time>${now()}</time><span>${escapeHtml(message)}</span>`;
     refs.log.append(line);
     refs.log.scrollTop = refs.log.scrollHeight;
+  }
+
+  function formatDateTime(value) {
+    if (!value) return '';
+    try { return i18n.formatDateTime(value); } catch { return String(value); }
+  }
+
+  function showManager(id) {
+    $$('.manager-overlay').forEach(manager => manager.classList.toggle('hidden', manager.id !== id));
+  }
+
+  function closeManager(id) {
+    $(`#${CSS.escape(id)}`)?.classList.add('hidden');
   }
 
   function renderModelStatus() {
@@ -282,6 +302,7 @@
     selectNode(node.id);
     commit('添加节点');
     renderGraph();
+    document.body.classList.remove('library-open');
   }
 
   function getInputs(node) { return node.data.inputs || []; }
@@ -775,13 +796,26 @@
     });
     return { id:state.workflow.id, name:state.workflow.name, version:1, nodes, edges:deepClone(state.workflow.edges) };
   }
+
+  function setDirty(value) {
+    state.dirty = Boolean(value);
+    const dot = $('.save-dot');
+    dot.style.background = state.dirty ? '#f2ad5f' : 'var(--green)';
+    dot.title = t(state.dirty ? 'workflow.status.dirty' : 'workflow.status.saved');
+    try { localStorage.setItem(AUTOSAVE_DIRTY_KEY, state.dirty ? '1' : '0'); } catch { /* storage may be unavailable */ }
+  }
+
+  function persistAutosave(payload = workflowPayload()) {
+    try { localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(payload)); } catch { /* storage may be unavailable */ }
+  }
+
   function commit(reason) {
     clearValidation();
-    state.dirty=true; $('.save-dot').style.background= '#f2ad5f'; $('.save-dot').title=t('workflow.status.dirty');
     const snapshot=JSON.stringify(state.workflow);
     if (state.history[state.historyIndex]===snapshot) return;
+    setDirty(true);
     state.history=state.history.slice(0,state.historyIndex+1);state.history.push(snapshot);if(state.history.length>60)state.history.shift();state.historyIndex=state.history.length-1;
-    localStorage.setItem('audioflow:autosave', JSON.stringify(workflowPayload()));
+    persistAutosave();
   }
   function restoreHistory(index) {
     const previousIndex = state.historyIndex;
@@ -791,18 +825,66 @@
     if (targetIndex < 0 || targetIndex >= state.history.length) return;
     resetGraphInteractions();
     state.historyIndex=targetIndex;state.workflow=JSON.parse(state.history[targetIndex]);state.selectedNode=null;state.selectedEdge=null;clearValidation();renderGraph();
+    setDirty(true);persistAutosave();
   }
 
-  async function saveWorkflow() {
-    state.workflow.name=refs.workflowName.value.trim()||t('workflow.untitled'); const payload=workflowPayload();
-    localStorage.setItem('audioflow:autosave',JSON.stringify(payload));
-    try { await api('/api/workflows',{method:'POST',body:JSON.stringify(payload)}); log(t('workflow.message.savedServer'),'success'); }
-    catch(error){ log(t('workflow.message.savedBrowser', { error:error.message }),'muted'); }
+  async function persistWorkflow(asCopy = false) {
+    if (state.workflowSavePending) return;
+    flushActiveInspectorField();
+    const currentName = refs.workflowName.value.trim() || t('workflow.untitled');
+    let name = currentName;
+    if (asCopy) {
+      name = window.prompt(t('workflow.saveAs.prompt'), `${currentName} ${t('workflow.saveAs.copySuffix')}`)?.trim();
+      if (!name) return;
+    }
+    const payload = workflowPayload();
+    payload.name = name;
+    if (asCopy) payload.id = uid('workflow');
+    const exists = !asCopy && state.serverWorkflowIds.has(payload.id);
+    const path = exists ? `/api/workflows/${encodeURIComponent(payload.id)}` : '/api/workflows';
+    const method = exists ? 'PUT' : 'POST';
+    state.workflowSavePending = true;
+    $('#saveWorkflow').disabled = true;
+    $('#saveAsWorkflow').disabled = true;
+    try {
+      const saved = await api(path, { method, body:JSON.stringify(payload) });
+      state.workflow.id = saved.id;
+      state.workflow.name = saved.name;
+      refs.workflowName.value = saved.name;
+      refs.canvasTitle.textContent = saved.name;
+      state.serverWorkflowIds.add(saved.id);
+      state.history = [JSON.stringify(state.workflow)];
+      state.historyIndex = 0;
+      setDirty(false);
+      persistAutosave(workflowPayload());
+      log(t('workflow.message.savedServer'), 'success');
+      toast(t(asCopy ? 'workflow.message.savedAs' : 'workflow.message.savedServer'), 'success');
+      await fetchWorkflows({ quiet:true });
+    } catch (error) {
+      persistAutosave();
+      toast(t('workflow.message.saveFailed', { error:error.message }), 'error');
+      log(t('workflow.message.saveFailed', { error:error.message }), 'error');
+    } finally {
+      state.workflowSavePending = false;
+      $('#saveWorkflow').disabled = false;
+      $('#saveAsWorkflow').disabled = false;
+    }
+  }
+
+  async function saveWorkflow() { await persistWorkflow(false); }
+  async function saveWorkflowAs() { await persistWorkflow(true); }
+
+  function exportWorkflow() {
+    flushActiveInspectorField();
+    state.workflow.name = refs.workflowName.value.trim() || t('workflow.untitled');
+    const payload = workflowPayload();
     const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');
     a.href=url;a.download=`${payload.name.replace(/[\\/:*?"<>|]/g,'_')}.audioflow.json`;a.click();URL.revokeObjectURL(url);
-    state.dirty=false;$('.save-dot').style.background='var(--green)';$('.save-dot').title=t('workflow.status.saved');toast(t('workflow.message.savedExported'),'success');
+    toast(t('workflow.message.exported'),'success');
   }
-  function loadWorkflowData(payload) {
+
+  function loadWorkflowData(source, { dirty = true, notify = true } = {}) {
+    const payload = deepClone(source);
     if(!payload||!Array.isArray(payload.nodes)||!Array.isArray(payload.edges))throw new Error(t('workflow.message.invalid'));
     flushActiveInspectorField();
     resetGraphInteractions();
@@ -821,7 +903,71 @@
       if (node.type === 'output_folder') { node.data.config = {path:node.data.path || '',naming:node.data.naming_template || '{basename}_{stem}.{ext}',format:node.data.format || 'wav',conflict:node.data.conflict || 'rename',...node.data.config}; node.data.config.path = String(node.data.config.path ?? '').trim(); }
     });
     payload.edges.forEach(edge => { edge.id ||= uid('edge'); });
-    state.workflow={id:payload.id||uid('workflow'),name:payload.name||t('workflow.loadedName'),nodes:payload.nodes,edges:payload.edges};state.selectedNode=null;state.selectedEdge=null;state.history=[];state.historyIndex=-1;commit('load');renderGraph();fitView();toast(t('workflow.message.loaded'),'success');
+    state.workflow={id:payload.id||uid('workflow'),name:payload.name||t('workflow.loadedName'),nodes:payload.nodes,edges:payload.edges};state.selectedNode=null;state.selectedEdge=null;
+    state.history=[JSON.stringify(state.workflow)];state.historyIndex=0;setDirty(dirty);persistAutosave();renderGraph();fitView();
+    if (notify) toast(t('workflow.message.loaded'),'success');
+  }
+
+  function createNewWorkflow() {
+    flushActiveInspectorField();
+    if(state.dirty&&!confirm(t('workflow.confirm.discard')))return;
+    resetGraphInteractions();
+    state.workflow={id:uid('workflow'),name:t('workflow.untitled'),nodes:[],edges:[]};
+    state.selectedNode=null;state.selectedEdge=null;state.history=[JSON.stringify(state.workflow)];state.historyIndex=0;
+    setDirty(true);persistAutosave();renderGraph();
+  }
+
+  function renderWorkflowList() {
+    if (!state.workflows.length) {
+      refs.workflowList.innerHTML = `<div class="manager-empty">${escapeHtml(t('workflow.manager.empty'))}</div>`;
+      return;
+    }
+    refs.workflowList.innerHTML = state.workflows.map(item => {
+      const current = item.id === state.workflow.id;
+      return `<article class="manager-row ${current ? 'current' : ''}">
+        <div class="manager-row-main"><div class="manager-row-title"><strong title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</strong>${current ? `<span class="manager-chip current">${escapeHtml(t('workflow.manager.current'))}</span>` : ''}</div><div class="manager-row-meta"><span>${escapeHtml(formatDateTime(item.updated_at))}</span><span>${escapeHtml(item.id)}</span></div></div>
+        <div class="manager-row-actions"><button class="text-button" data-open-workflow="${escapeHtml(item.id)}">${escapeHtml(t('workflow.manager.open'))}</button><button class="icon-button" data-delete-workflow="${escapeHtml(item.id)}" title="${escapeHtml(t('workflow.manager.delete'))}">×</button></div>
+      </article>`;
+    }).join('');
+    $$('[data-open-workflow]', refs.workflowList).forEach(button => button.addEventListener('click', () => openServerWorkflow(button.dataset.openWorkflow)));
+    $$('[data-delete-workflow]', refs.workflowList).forEach(button => button.addEventListener('click', () => deleteServerWorkflow(button.dataset.deleteWorkflow)));
+  }
+
+  async function fetchWorkflows({ quiet = false } = {}) {
+    if (!quiet) refs.workflowList.innerHTML = `<div class="manager-loading">${escapeHtml(t('manager.loading'))}</div>`;
+    try {
+      const result = await api('/api/workflows');
+      state.workflows = Array.isArray(result.workflows) ? result.workflows : [];
+      state.serverWorkflowIds = new Set(state.workflows.map(item => item.id));
+      renderWorkflowList();
+      return state.workflows;
+    } catch (error) {
+      if (!quiet) refs.workflowList.innerHTML = `<div class="manager-empty">${escapeHtml(t('workflow.message.listFailed', { error:error.message }))}</div>`;
+      return [];
+    }
+  }
+
+  async function openServerWorkflow(id) {
+    if (state.dirty && !confirm(t('workflow.confirm.switch'))) return;
+    try {
+      const workflow = await api(`/api/workflows/${encodeURIComponent(id)}`);
+      loadWorkflowData(workflow, { dirty:false });
+      state.serverWorkflowIds.add(workflow.id);
+      closeManager('workflowManager');
+    } catch (error) { toast(t('workflow.message.openFailed', { error:error.message }), 'error'); }
+  }
+
+  async function deleteServerWorkflow(id) {
+    const item = state.workflows.find(workflow => workflow.id === id);
+    if (!confirm(t('workflow.confirm.delete', { name:item?.name || id }))) return;
+    try {
+      await api(`/api/workflows/${encodeURIComponent(id)}`, { method:'DELETE' });
+      state.serverWorkflowIds.delete(id);
+      state.workflows = state.workflows.filter(workflow => workflow.id !== id);
+      if (state.workflow.id === id) { setDirty(true); persistAutosave(); }
+      renderWorkflowList();
+      toast(t('workflow.message.deleted'), 'success');
+    } catch (error) { toast(t('workflow.message.deleteFailed', { error:error.message }), 'error'); }
   }
 
   function friendlyValidationError(message) {
@@ -902,12 +1048,13 @@
     try {
       log(t('validation.checking'));
       if (!await validateBeforeRun(payload)) return;
-      state.running=true;
-      renderRunControls();$('#cancelRun').classList.remove('hidden');refs.activityState.className='activity-state running';refs.progress.classList.remove('hidden');refs.progressBar.style.width='3%';
+      state.running=true;state.cancelling=false;state.runStatus='queued';
+      renderRunControls();refs.activityState.className='activity-state running';refs.progress.classList.remove('hidden');refs.progressBar.style.width='3%';
       log(t('run.message.start', { name:state.workflow.name }));
       const result=await api('/api/runs',{method:'POST',body:JSON.stringify({workflow:payload})});
       state.runId=result.id||result.run_id||result.task_id;if(!state.runId)throw new Error(t('run.message.idMissing'));
-      log(t('run.message.created', { id:state.runId }));subscribeRun(state.runId);
+      try { localStorage.setItem(ACTIVE_RUN_KEY, state.runId); } catch { /* storage may be unavailable */ }
+      log(t('run.message.created', { id:state.runId }));subscribeRun(state.runId);fetchRuns({ quiet:true });
     } catch(error){
       if (state.running) finishRun('failed',error.message);
       else { toast(t('validation.checkFailed', { error:error.message }), 'error'); log(t('validation.checkFailed', { error:error.message }), 'error'); }
@@ -920,25 +1067,39 @@
   function renderRunControls() {
     const button = $('#runWorkflow');
     button.classList.toggle('running', state.running || state.validating);
+    button.disabled = state.running || state.validating;
     const key = state.validating ? 'validation.checkingShort' : state.running ? 'workflow.action.running' : 'workflow.action.run';
     button.innerHTML = `<span>${state.running || state.validating ? '◌' : '▶'}</span> <span>${escapeHtml(t(key))}</span>`;
-    $('#cancelRun').textContent = t('workflow.action.cancel');
+    const cancel = $('#cancelRun');
+    cancel.classList.toggle('hidden', !state.running);
+    cancel.disabled = state.cancelling;
+    cancel.textContent = t(state.cancelling ? 'run.action.cancelling' : 'workflow.action.cancel');
   }
+
+  function normalizeRunStatus(value) {
+    const status = String(value || '').toLowerCase();
+    if (['complete','success','done'].includes(status)) return 'completed';
+    if (status === 'error') return 'failed';
+    if (status === 'canceled') return 'cancelled';
+    if (status === 'started') return 'running';
+    return status;
+  }
+
   function subscribeRun(id) {
     if(state.eventSource)state.eventSource.close();
     const source=new EventSource(`/api/runs/${encodeURIComponent(id)}/events`);state.eventSource=source;
     source.onmessage=event=>{try{handleRunEvent(JSON.parse(event.data));}catch{log(event.data);}};
-    ['started','node_started','node_completed','file_started','file_completed','progress','completed','failed','cancelled'].forEach(type => source.addEventListener(type,event=>{try{handleRunEvent({...JSON.parse(event.data),type});}catch{log(event.data);}}));
+    ['queued','started','cancelling','node_started','node_completed','file_started','file_completed','progress','completed','failed','cancelled'].forEach(type => source.addEventListener(type,event=>{try{handleRunEvent({...JSON.parse(event.data),type});}catch{log(event.data);}}));
     source.addEventListener('log',event=>{try{handleRunEvent(JSON.parse(event.data));}catch{log(event.data);}});
-    source.onerror=()=>{source.close();if(state.running)pollRun(id);};
+    source.onerror=()=>{source.close();if(state.running&&state.runId===id)pollRun(id);};
   }
   async function pollRun(id) {
-    while(state.running&&state.runId===id){try{const result=await api(`/api/runs/${encodeURIComponent(id)}`);handleRunEvent(result);if(['completed','complete','success','failed','error','cancelled','canceled'].includes(String(result.status).toLowerCase()))return;}catch(error){log(t('run.message.statusFailed', { error:error.message }),'error');}await new Promise(r=>setTimeout(r,1200));}
+    while(state.running&&state.runId===id){try{const result=await api(`/api/runs/${encodeURIComponent(id)}`);handleRunEvent(result);if(TERMINAL_RUN_STATUSES.has(String(result.status).toLowerCase()))return;}catch(error){log(t('run.message.statusFailed', { error:error.message }),'error');}await new Promise(r=>setTimeout(r,1200));}
   }
 
   function localizedRunEvent(event, status) {
     if (status === 'started') return t('run.event.started');
-    if (status === 'queued') return t('run.event.queued');
+    if (status === 'queued') return event.queue_position ? t('run.event.queuedPosition', { position:i18n.formatNumber(event.queue_position) }) : t('run.event.queued');
     if (status === 'cancelling') return t('run.event.cancelling');
     if (status === 'node_started') return t('run.event.nodeStarted', { node:nodeTitle(state.workflow.nodes.find(node => node.id === event.node_id) || { type:'separator', data:{ title:event.node_id || '' } }) });
     if (status === 'node_completed') return t('run.event.nodeCompleted', { node:nodeTitle(state.workflow.nodes.find(node => node.id === event.node_id) || { type:'separator', data:{ title:event.node_id || '' } }) });
@@ -949,21 +1110,115 @@
   function handleRunEvent(event) {
     const progress=Number(event.progress??event.percent);if(Number.isFinite(progress))refs.progressBar.style.width=`${progress<=1?progress*100:progress}%`;
     if(event.node_id){$$('.node.running').forEach(n=>n.classList.remove('running'));$(`.node[data-node-id="${CSS.escape(event.node_id)}"]`)?.classList.add('running');}
-    const status=String(event.status||event.type||'').toLowerCase();
-    const terminal = ['completed','complete','success','done','failed','error','cancelled','canceled'].includes(status);
-    const message = localizedRunEvent(event, status);
-    if (message && !terminal) log(message,event.level==='error'?'error':'');
-    if(['completed','complete','success','done'].includes(status))finishRun('success',t('run.message.completed'));
-    if(['failed','error'].includes(status))finishRun('failed',event.error||event.message||t('run.message.failed'));
-    if(['cancelled','canceled'].includes(status))finishRun('cancelled',t('run.message.cancelled'));
+    const rawStatus=String(event.status||event.type||'').toLowerCase(), status=normalizeRunStatus(rawStatus);
+    const lifecycleStatus = ['queued','running','cancelling'].includes(status) ? status : null;
+    const statusChanged = lifecycleStatus && lifecycleStatus !== state.runStatus;
+    if (lifecycleStatus) {
+      state.runStatus = lifecycleStatus;
+      state.cancelling = lifecycleStatus === 'cancelling';
+      renderRunControls();
+    }
+    const terminal = TERMINAL_RUN_STATUSES.has(rawStatus);
+    const message = localizedRunEvent(event, rawStatus);
+    if (message && !terminal && (event.type || statusChanged)) log(message,event.level==='error'?'error':'');
+    if(status==='completed')finishRun('success',t('run.message.completed'));
+    if(status==='failed')finishRun('failed',event.error||event.message||t('run.message.failed'));
+    if(status==='cancelled')finishRun('cancelled',t('run.message.cancelled'));
   }
   function finishRun(status,message) {
-    state.running=false;if(state.eventSource){state.eventSource.close();state.eventSource=null;}renderRunControls();$('#cancelRun').classList.add('hidden');$$('.node.running').forEach(n=>n.classList.remove('running'));
+    const finishedId = state.runId;
+    state.running=false;state.cancelling=false;state.runStatus=status;if(state.eventSource){state.eventSource.close();state.eventSource=null;}renderRunControls();$$('.node.running').forEach(n=>n.classList.remove('running'));
     refs.activityState.className=`activity-state ${status==='success'?'success':status==='failed'?'error':''}`;refs.progressBar.style.width=status==='success'?'100%':'0';log(message,status==='success'?'success':status==='failed'?'error':'muted');toast(message,status==='success'?'success':status==='failed'?'error':'');state.runId=null;
+    try { if (localStorage.getItem(ACTIVE_RUN_KEY) === finishedId) localStorage.removeItem(ACTIVE_RUN_KEY); } catch { /* storage may be unavailable */ }
+    fetchRuns({ quiet:true });
   }
+
+  function renderRunSummary() {
+    const count = state.runs.filter(run => ACTIVE_RUN_STATUSES.has(normalizeRunStatus(run.status))).length;
+    refs.activeRunCount.textContent = count > 99 ? '99+' : String(count);
+    refs.activeRunCount.classList.toggle('hidden', count === 0);
+  }
+
+  function renderRunList() {
+    renderRunSummary();
+    if (!state.runs.length) {
+      refs.runList.innerHTML = `<div class="manager-empty">${escapeHtml(t('run.manager.empty'))}</div>`;
+      return;
+    }
+    refs.runList.innerHTML = state.runs.map(run => {
+      const status = normalizeRunStatus(run.status) || 'queued';
+      const active = ACTIVE_RUN_STATUSES.has(status);
+      const current = run.id === state.runId;
+      const progress = Math.max(0, Math.min(100, Number(run.progress || 0) * (Number(run.progress || 0) <= 1 ? 100 : 1)));
+      const queue = status === 'queued' && run.queue_position ? t('run.manager.queuePosition', { position:i18n.formatNumber(run.queue_position) }) : '';
+      const outputs = Array.isArray(run.outputs) && run.outputs.length ? plural('run.manager.outputs', run.outputs.length) : '';
+      const details = run.error || run.message || '';
+      return `<article class="manager-row ${current ? 'current' : ''}">
+        <div class="manager-row-main"><div class="manager-row-title"><strong title="${escapeHtml(run.workflow_name || run.workflow_id)}">${escapeHtml(run.workflow_name || run.workflow_id)}</strong><span class="manager-chip ${escapeHtml(status)}">${escapeHtml(t(`run.status.${status}`))}</span></div><div class="manager-row-meta"><span>${escapeHtml(formatDateTime(run.created_at))}</span><span>${escapeHtml(queue || outputs || run.id.slice(0,12))}</span></div>${details ? `<div class="manager-row-message" title="${escapeHtml(details)}">${escapeHtml(details)}</div>` : ''}<div class="manager-progress"><span style="width:${progress}%"></span></div></div>
+        <div class="manager-row-actions">${active ? `<button class="text-button" data-track-run="${escapeHtml(run.id)}" ${current ? 'disabled' : ''}>${escapeHtml(t(current ? 'run.manager.tracking' : 'run.manager.track'))}</button><button class="text-button" data-cancel-run="${escapeHtml(run.id)}" ${status === 'cancelling' ? 'disabled' : ''}>${escapeHtml(t(status === 'cancelling' ? 'run.action.cancelling' : 'workflow.action.cancel'))}</button>` : ''}</div>
+      </article>`;
+    }).join('');
+    $$('[data-track-run]', refs.runList).forEach(button => button.addEventListener('click', () => trackRunById(button.dataset.trackRun)));
+    $$('[data-cancel-run]', refs.runList).forEach(button => button.addEventListener('click', () => requestRunCancel(button.dataset.cancelRun)));
+  }
+
+  async function fetchRuns({ quiet = false } = {}) {
+    if (!quiet) refs.runList.innerHTML = `<div class="manager-loading">${escapeHtml(t('manager.loading'))}</div>`;
+    try {
+      const result = await api('/api/runs');
+      state.runs = Array.isArray(result.runs) ? result.runs : [];
+      renderRunList();
+      return state.runs;
+    } catch (error) {
+      if (!quiet) refs.runList.innerHTML = `<div class="manager-empty">${escapeHtml(t('run.message.listFailed', { error:error.message }))}</div>`;
+      return [];
+    }
+  }
+
+  function attachRun(run, recovered = false) {
+    const status = normalizeRunStatus(run.status);
+    if (!ACTIVE_RUN_STATUSES.has(status)) return;
+    if (state.eventSource) state.eventSource.close();
+    state.runId = run.id;state.running = true;state.validating = false;state.runStatus = status;state.cancelling = status === 'cancelling';
+    try { localStorage.setItem(ACTIVE_RUN_KEY, run.id); } catch { /* storage may be unavailable */ }
+    refs.activityState.className='activity-state running';refs.progress.classList.remove('hidden');
+    const progress=Number(run.progress || 0);refs.progressBar.style.width=`${progress<=1?progress*100:progress}%`;
+    renderRunControls();
+    if (recovered) log(t('run.message.recovered', { name:run.workflow_name || run.workflow_id }), 'success');
+    subscribeRun(run.id);
+  }
+
+  async function trackRunById(id) {
+    try {
+      const run = await api(`/api/runs/${encodeURIComponent(id)}`);
+      attachRun(run, true);
+      closeManager('runManager');
+      renderRunList();
+    } catch (error) { toast(t('run.message.statusFailed', { error:error.message }), 'error'); }
+  }
+
+  async function recoverActiveRun() {
+    await fetchRuns({ quiet:true });
+    let id = null;
+    try { id = localStorage.getItem(ACTIVE_RUN_KEY); } catch { /* storage may be unavailable */ }
+    if (!id) return;
+    const run = state.runs.find(item => item.id === id);
+    if (run && ACTIVE_RUN_STATUSES.has(normalizeRunStatus(run.status))) attachRun(run, true);
+    else try { localStorage.removeItem(ACTIVE_RUN_KEY); } catch { /* storage may be unavailable */ }
+  }
+
+  async function requestRunCancel(id) {
+    if (!id) return;
+    if (id === state.runId) log(t('run.message.cancelling'));
+    try {
+      const result = await api(`/api/runs/${encodeURIComponent(id)}`, { method:'DELETE' });
+      if (id === state.runId) handleRunEvent(result);
+      await fetchRuns({ quiet:true });
+    } catch (error) { toast(t('run.message.cancelFailed', { error:error.message }), 'error'); }
+  }
+
   async function cancelRun() {
-    if(!state.runId)return;log(t('run.message.cancelling'));
-    try{await api(`/api/runs/${encodeURIComponent(state.runId)}`,{method:'DELETE'});}catch{try{await api(`/api/runs/${encodeURIComponent(state.runId)}/cancel`,{method:'POST'});}catch(error){toast(t('run.message.cancelFailed', { error:error.message }),'error');return;}}finishRun('cancelled',t('run.message.cancelled'));
+    await requestRunCancel(state.runId);
   }
 
   function releasePointerCapture(interaction) {
@@ -1061,14 +1316,33 @@
     refs.viewport.addEventListener('wheel',event=>{event.preventDefault();const rect=refs.viewport.getBoundingClientRect();setZoom(state.transform.scale*(event.deltaY>0?.9:1.1),event.clientX-rect.left,event.clientY-rect.top);},{passive:false});
     refs.viewport.addEventListener('dragover',event=>{event.preventDefault();event.dataTransfer.dropEffect='copy';});
     refs.viewport.addEventListener('drop',event=>{event.preventDefault();try{const data=JSON.parse(event.dataTransfer.getData('application/x-audioflow-node'));const rect=refs.viewport.getBoundingClientRect(),p=screenToWorld(event.clientX-rect.left,event.clientY-rect.top);addFromTemplate(data.type,data.id,{x:p.x-112,y:p.y-25});}catch{}});
-    document.addEventListener('keydown',event=>{if(event.key==='Escape'&&(state.connectionDrag||state.pendingPort)){event.preventDefault();cancelConnection();return;}if(['INPUT','SELECT','TEXTAREA'].includes(event.target.tagName))return;if(event.key==='Delete'||event.key==='Backspace')removeSelected();if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z'){event.preventDefault();restoreHistory(state.historyIndex+(event.shiftKey?1:-1));}if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();saveWorkflow();}});
+    document.addEventListener('keydown',event=>{
+      const manager = $('.manager-overlay:not(.hidden)');
+      if (event.key === 'Escape' && manager) { event.preventDefault(); manager.classList.add('hidden'); return; }
+      if ((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s') { event.preventDefault(); saveWorkflow(); return; }
+      if(event.key==='Escape'&&(state.connectionDrag||state.pendingPort)){event.preventDefault();cancelConnection();return;}
+      if (manager || ['INPUT','SELECT','TEXTAREA'].includes(event.target.tagName)) return;
+      if(event.key==='Delete'||event.key==='Backspace')removeSelected();
+      if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='z'){event.preventDefault();restoreHistory(state.historyIndex+(event.shiftKey?1:-1));}
+    });
     $('#zoomIn').addEventListener('click',()=>setZoom(state.transform.scale*1.12));$('#zoomOut').addEventListener('click',()=>setZoom(state.transform.scale*.88));$('#zoomReset').addEventListener('click',()=>{state.transform={x:0,y:0,scale:1};applyTransform();});$('#fitView').addEventListener('click',fitView);
     $('#undoButton').addEventListener('click',()=>restoreHistory(state.historyIndex-1));$('#redoButton').addEventListener('click',()=>restoreHistory(state.historyIndex+1));
     $('#modelSearch').addEventListener('input',renderLibrary);$('#architectureFilter').addEventListener('change',renderLibrary);
     $('#refreshToggle').addEventListener('click',event=>{event.stopPropagation();$('#refreshMenu').classList.toggle('hidden');});document.addEventListener('click',()=>$('#refreshMenu').classList.add('hidden'));$$('#refreshMenu button').forEach(b=>b.addEventListener('click',()=>refreshModels(b.dataset.scope)));
     refs.workflowName.addEventListener('input',()=>{state.workflow.name=refs.workflowName.value;refs.canvasTitle.textContent=refs.workflowName.value;commit('重命名工作流');});
-    $('#saveWorkflow').addEventListener('click',saveWorkflow);$('#loadWorkflow').addEventListener('click',()=>$('#workflowFile').click());$('#workflowFile').addEventListener('change',async event=>{try{loadWorkflowData(JSON.parse(await event.target.files[0].text()));}catch(error){toast(t('workflow.message.loadFailed', { error:error.message }),'error');}event.target.value='';});
-    $('#newWorkflow').addEventListener('click',()=>{flushActiveInspectorField();if(state.dirty&&!confirm(t('workflow.confirm.discard')))return;resetGraphInteractions();state.workflow={id:uid('workflow'),name:t('workflow.untitled'),nodes:[],edges:[]};state.history=[];state.historyIndex=-1;commit('new');renderGraph();});
+    $('#saveWorkflow').addEventListener('click',saveWorkflow);
+    $('#newWorkflow').addEventListener('click',createNewWorkflow);
+    $('#toggleLibrary').addEventListener('click',()=>document.body.classList.toggle('library-open'));
+    $('#manageWorkflows').addEventListener('click',()=>{showManager('workflowManager');fetchWorkflows();});
+    $('#refreshWorkflows').addEventListener('click',()=>fetchWorkflows());
+    $('#saveAsWorkflow').addEventListener('click',saveWorkflowAs);
+    $('#exportWorkflow').addEventListener('click',exportWorkflow);
+    $('#importWorkflow').addEventListener('click',()=>$('#workflowFile').click());
+    $('#workflowFile').addEventListener('change',async event=>{try{const file=event.target.files[0];if(file&&(!state.dirty||confirm(t('workflow.confirm.switch')))){loadWorkflowData(JSON.parse(await file.text()));closeManager('workflowManager');}}catch(error){toast(t('workflow.message.loadFailed', { error:error.message }),'error');}event.target.value='';});
+    $('#manageRuns').addEventListener('click',()=>{showManager('runManager');fetchRuns();});
+    $('#refreshRuns').addEventListener('click',()=>fetchRuns());
+    $$('.manager-close').forEach(button=>button.addEventListener('click',()=>closeManager(button.dataset.closeManager)));
+    $$('.manager-overlay').forEach(manager=>manager.addEventListener('pointerdown',event=>{if(event.target===manager)closeManager(manager.id);}));
     $('#runWorkflow').addEventListener('click',runWorkflow);$('#cancelRun').addEventListener('click',cancelRun);$('#closeInspector').addEventListener('click',()=>{state.selectedNode=null;state.selectedEdge=null;renderSelection();renderEdges();renderInspector();});
     $('#activityToggle').addEventListener('click',()=>{$('.activity-panel').classList.toggle('collapsed');$('#activityChevron').textContent=$('.activity-panel').classList.contains('collapsed')?'⌄':'⌃';});
     window.addEventListener('audioflow:localechange', renderLocalizedUI);
@@ -1082,7 +1356,9 @@
     renderGraph();
     renderRunControls();
     renderModelStatus();
-    $('.save-dot').title = t(state.dirty ? 'workflow.status.dirty' : 'workflow.status.saved');
+    setDirty(state.dirty);
+    renderWorkflowList();
+    renderRunList();
     if (state.pendingPort) {
       findPortElement(state.pendingPort)?.classList.add('pending');
       refs.hint.textContent = t('connection.clickOpposite');
@@ -1091,10 +1367,12 @@
   }
 
   function initWorkflow() {
-    const saved=localStorage.getItem('audioflow:autosave');
-    if(saved){try{loadWorkflowData(JSON.parse(saved));state.dirty=false;$('.save-dot').style.background='var(--green)';return;}catch{/* ignore */}}
-    const input=makeNode('input_folder',80,150), output=makeNode('output_folder',445,180);state.workflow.nodes=[input,output];commit('initial');state.dirty=false;renderGraph();
+    let saved = null, dirty = false;
+    try { saved=localStorage.getItem(AUTOSAVE_KEY);dirty=localStorage.getItem(AUTOSAVE_DIRTY_KEY)==='1'; } catch { /* storage may be unavailable */ }
+    if(saved){try{loadWorkflowData(JSON.parse(saved), { dirty, notify:false });return;}catch{/* ignore corrupt autosave */}}
+    const input=makeNode('input_folder',80,150), output=makeNode('output_folder',445,180);state.workflow.nodes=[input,output];state.history=[JSON.stringify(state.workflow)];state.historyIndex=0;setDirty(false);persistAutosave();renderGraph();
   }
 
-  bindGlobalEvents();initWorkflow();applyTransform();renderRunControls();loadModels();
+  bindGlobalEvents();initWorkflow();applyTransform();renderRunControls();loadModels();fetchWorkflows({ quiet:true });recoverActiveRun();
+  window.setInterval(()=>{if(state.running||!$('#runManager').classList.contains('hidden'))fetchRuns({ quiet:true });},1800);
 })();

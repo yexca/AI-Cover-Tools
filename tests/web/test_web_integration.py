@@ -190,6 +190,17 @@ class DummyRunManager:
     def submit(self, workflow):
         return {"id": "dummy-run", "workflow_id": workflow.id, "status": "queued"}
 
+    def list(self, limit=100):
+        return [
+            {
+                "id": "dummy-run",
+                "workflow_id": "fixture-workflow",
+                "workflow_name": "branching separation",
+                "status": "queued",
+                "queue_position": 1,
+            }
+        ][:limit]
+
     def get(self, run_id):
         return None
 
@@ -233,6 +244,10 @@ class ApiAndStaticTests(unittest.TestCase):
                 self.assertIn("multistem_separation", javascript.text)
                 self.assertIn("normalization_threshold", javascript.text)
                 self.assertEqual(client.get("/api/not-a-route").status_code, 404)
+
+                runs = client.get("/api/runs")
+                self.assertEqual(runs.status_code, 200)
+                self.assertEqual(runs.json()["runs"][0]["queue_position"], 1)
 
                 payload = workflow_payload(root / "song.wav", root / "vocals", root / "instrumental")
                 created = client.post("/api/workflows", json=payload)

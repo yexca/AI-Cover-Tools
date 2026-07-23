@@ -26,9 +26,11 @@
           <option value="en" data-i18n="locale.en">English</option>
         </select>
       </label>
+      <button class="icon-button mobile-only" id="toggleLibrary" title="Node library" data-i18n-title="library.toggle"><span>☰</span></button>
       <button class="icon-button" id="newWorkflow" title="New workflow" data-i18n-title="workflow.action.new"><span>＋</span></button>
-      <button class="text-button" id="loadWorkflow"><span class="button-icon">↥</span> <span data-i18n="workflow.action.load">Load</span></button>
-      <button class="text-button" id="saveWorkflow"><span class="button-icon">↧</span> <span data-i18n="workflow.action.save">Save</span></button>
+      <button class="text-button" id="manageWorkflows"><span class="button-icon">▤</span> <span class="top-action-label" data-i18n="workflow.action.manage">Workflows</span></button>
+      <button class="text-button" id="saveWorkflow"><span class="button-icon">↓</span> <span class="top-action-label" data-i18n="workflow.action.save">Save</span></button>
+      <button class="icon-button run-history-button" id="manageRuns" title="Runs" data-i18n-title="run.action.history"><span>◴</span><b class="count-badge hidden" id="activeRunCount">0</b></button>
       <span class="divider"></span>
       <button class="cancel-button hidden" id="cancelRun" data-i18n="workflow.action.cancel">Cancel</button>
       <button class="run-button" id="runWorkflow"><span>▶</span> <span data-i18n="workflow.action.run">Run workflow</span></button>
@@ -106,6 +108,36 @@
       </section>
     </aside>
   </main>
+
+  <div class="manager-overlay hidden" id="workflowManager" role="dialog" aria-modal="true" aria-labelledby="workflowManagerTitle">
+    <section class="manager-dialog">
+      <header class="manager-header">
+        <div><span class="eyebrow" data-i18n="workflow.manager.eyebrow">WORKFLOWS</span><h2 id="workflowManagerTitle" data-i18n="workflow.manager.title">Saved workflows</h2><p data-i18n="workflow.manager.subtitle">Workflows stored by this local service</p></div>
+        <button class="icon-button small manager-close" data-close-manager="workflowManager" title="Close" data-i18n-title="manager.close">×</button>
+      </header>
+      <div class="manager-actions">
+        <button class="text-button" id="importWorkflow"><span class="button-icon">↑</span><span data-i18n="workflow.action.import">Import JSON</span></button>
+        <button class="text-button" id="exportWorkflow"><span class="button-icon">↓</span><span data-i18n="workflow.action.export">Export JSON</span></button>
+        <button class="text-button" id="saveAsWorkflow"><span class="button-icon">＋</span><span data-i18n="workflow.action.saveAs">Save as</span></button>
+        <span class="manager-action-spacer"></span>
+        <button class="icon-button small" id="refreshWorkflows" title="Refresh" data-i18n-title="manager.refresh">↻</button>
+      </div>
+      <div class="manager-list" id="workflowList"></div>
+    </section>
+  </div>
+
+  <div class="manager-overlay hidden" id="runManager" role="dialog" aria-modal="true" aria-labelledby="runManagerTitle">
+    <section class="manager-dialog">
+      <header class="manager-header">
+        <div><span class="eyebrow" data-i18n="run.manager.eyebrow">RUNS</span><h2 id="runManagerTitle" data-i18n="run.manager.title">Run history</h2><p data-i18n="run.manager.subtitle">Current queue and runs from this server session</p></div>
+        <button class="icon-button small manager-close" data-close-manager="runManager" title="Close" data-i18n-title="manager.close">×</button>
+      </header>
+      <div class="manager-actions manager-actions-right">
+        <button class="icon-button small" id="refreshRuns" title="Refresh" data-i18n-title="manager.refresh">↻</button>
+      </div>
+      <div class="manager-list" id="runList"></div>
+    </section>
+  </div>
 
   <div class="toast-stack" id="toastStack"></div>
   <input class="hidden" id="workflowFile" type="file" accept="application/json,.json">
