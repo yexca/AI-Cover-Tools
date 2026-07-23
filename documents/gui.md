@@ -1,6 +1,6 @@
-# GUI
+# Desktop GUI
 
-The GUI uses PySide6 and lives under `app/gui`.
+The desktop GUI uses PySide6 and lives under `app/gui`. The browser-based graph editor is documented separately in [WebUI](webui.md).
 
 ## Structure
 

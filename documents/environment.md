@@ -22,7 +22,7 @@ Behavior:
 2. If it does not exist, download Miniconda into `env/conda`.
 3. Create `env` with Python 3.12 and ffmpeg from conda-forge.
 4. Add `env`, `env/Scripts`, and the normal conda binary paths to the process path as needed.
-5. Check and install GUI, PyTorch, separation, ONNX, and tools dependencies.
+5. Check and install desktop GUI, WebUI, PyTorch, separation, ONNX, and tools dependencies.
 
 ## Dependency Groups
 
@@ -31,6 +31,15 @@ Behavior:
 - `PySide6==6.8.1`
 
 The installer tries conda-forge first and pip as fallback.
+
+The WebUI Windows path picker reuses PySide6 in a short-lived subprocess. This keeps Qt on the subprocess main thread and does not add another GUI dependency.
+
+### WebUI
+
+- `fastapi==0.116.1`
+- `uvicorn[standard]==0.35.0`
+
+The WebUI frontend uses browser-native JavaScript and CSS and has no package-manager or build dependency.
 
 ### Torch
 

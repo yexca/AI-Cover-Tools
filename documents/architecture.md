@@ -1,6 +1,6 @@
 # Architecture
 
-AI-Cover is a local audio workflow application with a PySide6 GUI and separate workflow modules.
+AI-Cover is a local audio workflow application with a PySide6 desktop GUI, a FastAPI browser WebUI, and separate workflow modules.
 
 ## Top-Level Layout
 
@@ -9,10 +9,12 @@ main.py                 CLI entry for separation
 config.py               user-facing separation config
 run.bat                 CLI launcher
 run-gui.bat             GUI launcher
+run-webui.bat           WebUI launcher
 run-install.bat         local environment installer
 app/
   config/               defaults and config loader support
   gui/                  PySide6 shell and pages
+  web/                  FastAPI graph editor, model registry, and executor
   separate/             audio-separator pipeline
   slicer/               RMS silence slicing
   tools/                standalone audio utilities
@@ -38,6 +40,7 @@ user_data/              GUI presets and generated GUI config
 - `app/inference`: placeholder for future cover-generation integration.
 - `app/utils`: shared helpers such as `AudioItem`, safe names, and numbered IDs.
 - `app/gui`: GUI layer. It owns widgets, pages, translations, and worker wiring, but not the audio algorithms.
+- `app/web`: local browser application. It owns the graph editor, API contracts, model metadata registry, structured validation, and its queued audio graph executor.
 
 ## Dependency Direction
 
@@ -45,12 +48,18 @@ user_data/              GUI presets and generated GUI config
 main.py / app.gui
   -> app.separate | app.slicer | app.tools | app.train | app.inference
        -> app.utils
+
+app.web
+  -> python-audio-separator | app.config.defaults
+  -> models | user_data | selected input/output paths
 ```
 
 Rules:
 
 - GUI pages may call workflow APIs and display dataclass results.
 - Workflow modules must not import GUI code.
+- Desktop GUI code belongs under `app/gui`; browser and API code belongs under `app/web`.
+- WebUI port handles are execution contracts. Frontend code must preserve exact backend stem values.
 - Avoid sideways imports between workflow modules unless a helper is intentionally shared through `app/utils`.
 - Stage-specific third-party imports should stay near the stage that needs them.
 
@@ -68,6 +77,7 @@ Use these boundary types:
 - `Path` for concrete files and directories.
 - Dataclasses for in-process results.
 - JSON files for persistent GUI data or manifests.
+- Pydantic models for WebUI request, workflow, node, and edge contracts.
 
 Existing result dataclasses:
 
@@ -84,3 +94,6 @@ Existing result dataclasses:
 - Slicer writes user-selected output folders and does not archive automatically.
 - Tools write under user-selected paths or tool-specific folders under `outputs`.
 - GUI-generated separation config is written to `user_data/gui_separate_config.py`.
+- WebUI model metadata is cached in `user_data/model_registry.json`.
+- WebUI workflows are stored in `user_data/web_workflows.json`.
+- WebUI intermediate separator output is written under `user_data/web_runs/<run-id>`; output nodes copy or convert final artifacts into their configured folders.

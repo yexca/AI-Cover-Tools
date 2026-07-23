@@ -7,6 +7,7 @@ This folder is the source of truth for the current project structure and behavio
 - [Architecture](architecture.md): package boundaries, data flow, and ownership rules.
 - [Environment](environment.md): local `env`, installer behavior, and dependency groups.
 - [GUI](gui.md): desktop shell, pages, widgets, threading, and i18n.
+- [WebUI](webui.md): browser graph editor, model registry, API, validation, and execution.
 - [Separate](separate.md): separation CLI and GUI model pipeline.
 - [Slicer](slicer.md): training-clip slicing workflow.
 - [Tools](tools.md): audio quality, duration, pitch, and normalize utilities.
@@ -29,12 +30,20 @@ Placeholder pages:
 - Train
 - Inference
 
+Implemented WebUI node types:
+
+- Single audio file input
+- Audio folder input
+- Model-based separator
+- Output folder
+
 Main runnable entry points:
 
 ```bat
 run-install.bat
 run.bat
 run-gui.bat
+run-webui.bat
 ```
 
-The GUI should call workflow modules. Audio processing should stay outside `app/gui`.
+The desktop GUI should call workflow modules. Audio processing should stay outside `app/gui`. The WebUI owns a separate graph executor under `app/web` and must keep its frontend, API contracts, validation, and execution handles consistent.

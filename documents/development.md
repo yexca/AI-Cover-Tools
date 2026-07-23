@@ -5,6 +5,7 @@ This project is growing page by page. Keep changes scoped to the module that own
 ## General Rules
 
 - GUI code lives under `app/gui`.
+- WebUI frontend, API, validation, and graph execution code lives under `app/web`.
 - Audio processing lives under workflow modules.
 - Shared small helpers live under `app/utils`.
 - Do not put long-running work on the GUI thread.
@@ -63,6 +64,19 @@ env\python.exe -c "from PySide6.QtWidgets import QApplication; from app.gui.i18n
 For workflow changes, create a short temporary audio file and run the workflow directly through `env/python.exe`.
 
 Clean temporary output after smoke tests.
+
+For WebUI changes:
+
+```bat
+env\python.exe -m unittest discover -s app\web\tests -v
+env\python.exe -m unittest discover -s tests -v
+node --check app\web\static\app.js
+git diff --check
+```
+
+When changing model outputs or ports, verify that raw stem handles survive registry, frontend, validation, and execution without case conversion or whitespace normalization.
+
+When changing pointer interactions, cover pointer up, pointer cancel, lost capture, window blur, workflow replacement, and node deletion. Native path-picker changes also require one real Windows select/cancel smoke test.
 
 ## Git Hygiene
 

@@ -135,3 +135,15 @@ Defaults:
 - normalize input folder: `inputs`
 - normalize output folder: `outputs`
 - normalize target peak: `-3.0 dB`
+
+## WebUI State
+
+WebUI server state is stored under `user_data`:
+
+- `model_registry.json`: detected model metadata
+- `web_workflows.json`: saved workflow payloads
+- `web_runs/<run-id>/`: intermediate separator artifacts
+
+The browser also stores the current autosave, model-list cache, and locale preference in local storage. These values are editor state, not root `config.py` overrides.
+
+Separator nodes start with common defaults from `app/config/defaults.py`, then overlay the node's `options`, `mdx_params`, `vr_params`, `demucs_params`, and `mdxc_params`. Only an allowlisted subset of common separator options is forwarded by the WebUI executor.
