@@ -22,6 +22,8 @@ result = run_slicer(
 
 `run_slicer` returns `SlicerRunResult`.
 
+`run_slicing_task` processes one concrete audio file and is reused by the WebUI slicer node. The graph executor owns the per-run intermediate directory and preserves artifact metadata while expanding one input artifact into multiple clip artifacts.
+
 ## GUI Page
 
 Cards:

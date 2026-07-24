@@ -1,6 +1,6 @@
 # WebUI
 
-The WebUI is a local ComfyUI-style editor for audio processing graphs. It uses a static browser frontend, a FastAPI backend, and a single-worker executor for `python-audio-separator` jobs.
+The WebUI is a local ComfyUI-style editor for audio processing graphs. It uses a static browser frontend, a FastAPI backend, and a single-worker executor for separation, slicing, peak-normalization, and output jobs.
 
 ## Run
 
@@ -68,9 +68,13 @@ Legacy editor node names such as `file_input`, `folder_input`, `model`, and `out
 
 ## Editor Behavior
 
-- Drag a library item to the canvas or double-click it to add a node.
+- Drag a library item to the canvas, double-click it, or focus it and press Enter/Space to add a node.
 - Click a node to open its properties.
-- The interface uses a 16 px root font size, with larger labels, fields, workflow tabs, dialogs, and node text so the editor remains legible without browser zoom.
+- The node library uses compact two-line rows. Primary labels are 14 px, secondary metadata is 11 px, and drag affordances appear on hover or keyboard focus.
+- Library sections are `Input`, `Audio preparation`, `Separation`, `Cleanup`, `Other`, and `Output`. Separator models have a second level for vocal/instrumental separation, multi-stem separation, denoise, dereverb/de-echo, vocal cleanup, or unclassified models.
+- Architecture is a filter and metadata value, not a task category. Model installation and output-confirmation state are also independent of the category tree.
+- Hover or focus a model row to see its complete display name, filename, function, architecture, output stems, metadata source, and confidence. The selected model node repeats durable model details in the properties panel.
+- Canvas model nodes keep only their title, function, and ports. Filename, architecture, and metadata are intentionally deferred to the model preview and properties panel.
 - The node-library title, search and architecture filter, and model-count footer stay fixed within the sidebar. Only the grouped node list scrolls when its contents exceed the viewport height.
 - The node library and properties panel use mirrored controls at the left and right canvas edges. Collapsing a panel keeps its control attached to the corresponding edge so it can be reopened in place.
 - On desktop viewports, both sidebars can be resized by dragging their separators. Focused separators also accept the arrow keys in 10 px steps, Shift+arrow in 30 px steps, and Home/End for the allowed minimum/maximum width.
@@ -111,7 +115,12 @@ The refresh menu exposes:
 
 Metadata sources include the bundled `python-audio-separator` catalog and scores, cached catalog data, model filenames, and compatible YAML files. Registry entries include architecture, backend, function, outputs, confidence, metadata source, installation state, and `needs_confirmation`.
 
-Models without confirmed output stems remain visible as needing confirmation but cannot pass run validation. The current UI does not yet provide a metadata-confirmation editor.
+`function` and `needs_confirmation` describe different dimensions:
+
+- `function` controls task grouping. A model with confirmed outputs but no recognized task stays usable under `Other` / `Unclassified`.
+- `needs_confirmation` means the registry has no confirmed output stems. The model remains visible with a warning, but the library disables drag, double-click, and keyboard insertion because such a node cannot pass workflow validation.
+
+The current UI does not yet provide a metadata-confirmation editor. Confirmation must come from compatible YAML or catalog/score metadata discovered during a registry refresh.
 
 ## Native Path Picker
 
@@ -245,7 +254,7 @@ Do not translate user workflow names, custom node titles, filesystem paths, mode
 
 ## Current Limitations
 
-- Models with uncertain function or outputs need an explicit metadata editor.
+- Models with an uncertain function remain in `Other` / `Unclassified`; models without confirmed output stems still need an explicit metadata editor.
 - The executor visits every node in topological order; it does not yet prune nodes that cannot reach an output.
 - Advanced separator parameters are present in the backend but only a small subset is exposed in the inspector.
 - Multi-select, copy/paste, groups, comments, and reusable subgraphs are not implemented.

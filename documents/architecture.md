@@ -28,7 +28,7 @@ models/                 model cache
 outputs/                active outputs and tool outputs
 archives/               archived separation runs
 sample/                 reference or vendored sample projects
-user_data/              GUI presets and generated GUI config
+user_data/              GUI presets, WebUI state, run records, and generated config
 ```
 
 ## Workflow Modules
@@ -50,7 +50,7 @@ main.py / app.gui
        -> app.utils
 
 app.web
-  -> python-audio-separator | app.config.defaults
+  -> python-audio-separator | app.slicer | app.tools | app.config.defaults
   -> models | user_data | selected input/output paths
 ```
 
@@ -60,6 +60,7 @@ Rules:
 - Workflow modules must not import GUI code.
 - Desktop GUI code belongs under `app/gui`; browser and API code belongs under `app/web`.
 - WebUI port handles are execution contracts. Frontend code must preserve exact backend stem values.
+- WebUI task classification, architecture, installation state, and output-confirmation state are separate dimensions. Missing output stems must not be represented as a task category.
 - Avoid sideways imports between workflow modules unless a helper is intentionally shared through `app/utils`.
 - Stage-specific third-party imports should stay near the stage that needs them.
 

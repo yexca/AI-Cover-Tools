@@ -147,7 +147,7 @@ WebUI server state is stored under `user_data`:
 - `web_runs/<run-id>/workflow.json`: immutable workflow snapshot used by the run
 - `web_runs/<run-id>/<node-id>/`: intermediate separator artifacts
 
-The browser stores independent workflow drafts and their recency index, the model-list cache, and locale preference in local storage. Open tab order and the active tab are stored in session storage. Run tracking is reconciled from the server snapshot and global event stream instead of a browser-stored run ID. These values are editor state, not root `config.py` overrides.
+The browser stores independent workflow drafts and their recency index, the model-list cache, locale preference, and preferred sidebar widths in local storage. Open tab order and the active tab are stored in session storage. Sidebar visibility is derived from the viewport and is not persisted. Run tracking is reconciled from the server snapshot and global event stream instead of a browser-stored run ID. These values are editor state, not root `config.py` overrides.
 
 `web_workflows.json` is a retained legacy input. On first startup after this storage change, its valid workflows are copied into `workflows/`; subsequent reads and writes use the independent files.
 
