@@ -162,7 +162,7 @@ class RunManager:
                 self._event(run, "cancelled", "Workflow cancelled before it started", progress=run.progress)
             else:
                 run.status = "cancelling"
-                self._event(run, "cancelling", "Cancellation will take effect after the current model call", progress=run.progress)
+                self._event(run, "cancelling", "Cancellation will take effect after the current file operation", progress=run.progress)
             positions = self._queue_positions()
             return run.public(positions.get(run.id))
 
@@ -347,6 +347,14 @@ class RunManager:
                     stems = self._separate(run, node.id, node.data, inputs, run_dir / node.id)
                     for stem, artifacts in stems.items():
                         products[(node.id, stem)] = artifacts
+                elif node.type == "slicer":
+                    products[(node.id, "audio")] = self._slice_audio(
+                        run, node.id, node.data, inputs, run_dir / node.id
+                    )
+                elif node.type == "peak_normalize":
+                    products[(node.id, "audio")] = self._peak_normalize(
+                        run, node.id, node.data, inputs, run_dir / node.id
+                    )
                 elif node.type == "output_folder":
                     written = self._write_outputs(run, node.id, node.data, inputs)
                     products[(node.id, "audio")] = [
@@ -453,6 +461,104 @@ class RunManager:
                     progress=run.progress,
                 )
         return dict(result)
+
+    def _slice_audio(
+        self,
+        run: RunState,
+        node_id: str,
+        data: dict[str, Any],
+        inputs: list[AudioArtifact],
+        output_dir: Path,
+    ) -> list[AudioArtifact]:
+        if not inputs:
+            return []
+        from app.slicer.workflow import SlicerSettings, run_slicing_task
+
+        output_format = str(data.get("output_format") or "wav").lower().lstrip(".")
+        settings = SlicerSettings(
+            threshold=float(data.get("threshold", -40.0)),
+            min_length=int(data.get("min_length", 5000)),
+            min_interval=int(data.get("min_interval", 300)),
+            hop_size=int(data.get("hop_size", 10)),
+            max_sil_kept=int(data.get("max_sil_kept", 1000)),
+        )
+        products: list[AudioArtifact] = []
+        for item_index, artifact in enumerate(inputs):
+            self._check_cancel(run)
+            item_dir = output_dir / f"{item_index:06d}"
+            result = run_slicing_task(artifact.path, item_dir, output_format, settings)
+            if not result.success:
+                raise RuntimeError(f"Slicing failed for {artifact.path.name}: {result.error}")
+            for slice_index, path in enumerate(result.output_paths):
+                products.append(
+                    AudioArtifact(
+                        path=path,
+                        basename=f"{artifact.basename}_{slice_index:03d}",
+                        relative_dir=artifact.relative_dir,
+                        stem=artifact.stem,
+                        model=artifact.model,
+                        node=node_id,
+                    )
+                )
+            with self._lock:
+                self._event(
+                    run,
+                    "file_completed",
+                    f"Sliced {artifact.path.name} into {len(result.output_paths)} clips",
+                    node_id=node_id,
+                    file=str(artifact.path),
+                    file_index=item_index + 1,
+                    file_count=len(inputs),
+                    output_count=len(result.output_paths),
+                    progress=run.progress,
+                )
+        return products
+
+    def _peak_normalize(
+        self,
+        run: RunState,
+        node_id: str,
+        data: dict[str, Any],
+        inputs: list[AudioArtifact],
+        output_dir: Path,
+    ) -> list[AudioArtifact]:
+        if not inputs:
+            return []
+        from app.tools import normalize_audio_file
+
+        target_peak_db = float(data.get("target_peak_db", -3.0))
+        products: list[AudioArtifact] = []
+        for item_index, artifact in enumerate(inputs):
+            self._check_cancel(run)
+            destination = output_dir / f"{item_index:06d}" / artifact.path.name
+            try:
+                normalized_path = normalize_audio_file(artifact.path, destination, target_peak_db)
+            except subprocess.CalledProcessError as exc:
+                details = (exc.stderr or exc.stdout or "").strip().splitlines()
+                message = details[-1] if details else str(exc)
+                raise RuntimeError(f"Peak normalization failed for {artifact.path.name}: {message}") from exc
+            products.append(
+                AudioArtifact(
+                    path=normalized_path,
+                    basename=artifact.basename,
+                    relative_dir=artifact.relative_dir,
+                    stem=artifact.stem,
+                    model=artifact.model,
+                    node=node_id,
+                )
+            )
+            with self._lock:
+                self._event(
+                    run,
+                    "file_completed",
+                    f"Peak-normalized {artifact.path.name}",
+                    node_id=node_id,
+                    file=str(artifact.path),
+                    file_index=item_index + 1,
+                    file_count=len(inputs),
+                    progress=run.progress,
+                )
+        return products
 
     @staticmethod
     def _identify_stem(path: Path, prefix: str, expected: list[str]) -> str:

@@ -8,6 +8,7 @@ from .workflow import (
     analyze_audio_quality,
     analyze_dataset_pitch,
     calculate_total_duration,
+    normalize_audio_file,
     normalize_audio_directory,
 )
 
@@ -19,5 +20,6 @@ __all__ = [
     "analyze_audio_quality",
     "analyze_dataset_pitch",
     "calculate_total_duration",
+    "normalize_audio_file",
     "normalize_audio_directory",
 ]

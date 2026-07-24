@@ -130,6 +130,7 @@ Behavior:
 - runs `ffmpeg-normalize` with peak normalization
 - preserves relative folder structure in the output folder
 - uses the original file extension for output
+- exposes `normalize_audio_file` for callers such as the WebUI that already own a concrete artifact list
 
 Equivalent command shape:
 

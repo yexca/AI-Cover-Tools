@@ -203,24 +203,8 @@ def normalize_audio_directory(input_dir: Path, output_dir: Path, target_peak_db:
     for source_path in files:
         relative_path = source_path.relative_to(input_dir)
         destination_path = (output_dir / relative_path).with_suffix(source_path.suffix)
-        destination_path.parent.mkdir(parents=True, exist_ok=True)
-        command = [
-            sys.executable,
-            "-m",
-            "ffmpeg_normalize",
-            str(source_path),
-            "-nt",
-            "peak",
-            "-t",
-            f"{target_peak_db:g}",
-            "-ext",
-            source_path.suffix.lstrip(".") or "wav",
-            "-o",
-            str(destination_path),
-            "-f",
-        ]
         try:
-            subprocess.run(command, check=True, capture_output=True, text=True, env=_subprocess_env())
+            normalize_audio_file(source_path, destination_path, target_peak_db)
         except subprocess.CalledProcessError as exc:
             error = (exc.stderr or exc.stdout or "").strip().splitlines()
             failed_files.append(f"{source_path.name}: {error[-1] if error else type(exc).__name__}")
@@ -236,6 +220,33 @@ def normalize_audio_directory(input_dir: Path, output_dir: Path, target_peak_db:
         failed_count=len(failed_files),
         failed_files=failed_files,
     )
+
+
+def normalize_audio_file(source_path: Path, destination_path: Path, target_peak_db: float = -3.0) -> Path:
+    """Peak-normalize one audio file and return its concrete output path."""
+
+    source_path = source_path.expanduser().resolve()
+    destination_path = destination_path.expanduser().resolve()
+    if not source_path.is_file():
+        raise FileNotFoundError(source_path)
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        sys.executable,
+        "-m",
+        "ffmpeg_normalize",
+        str(source_path),
+        "-nt",
+        "peak",
+        "-t",
+        f"{target_peak_db:g}",
+        "-ext",
+        destination_path.suffix.lstrip(".") or source_path.suffix.lstrip(".") or "wav",
+        "-o",
+        str(destination_path),
+        "-f",
+    ]
+    subprocess.run(command, check=True, capture_output=True, text=True, env=_subprocess_env())
+    return destination_path
 
 
 def analyze_dataset_pitch(

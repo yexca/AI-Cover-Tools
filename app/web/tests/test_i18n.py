@@ -49,6 +49,13 @@ class I18nTests(unittest.TestCase):
         self.assertIn("return { id: item, label: item }", source)
         self.assertNotIn("id: item.toLowerCase().replace", source)
 
+    def test_frontend_exposes_audio_preparation_nodes(self) -> None:
+        source = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+        self.assertIn("{ type: 'slicer'", source)
+        self.assertIn("{ type: 'peak_normalize'", source)
+        self.assertIn("node.type === 'slicer'", source)
+        self.assertIn("node.type === 'peak_normalize'", source)
+
     def test_frontend_exposes_workflow_and_run_management(self) -> None:
         source = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
         index = (STATIC_DIR / "index.html").read_text(encoding="utf-8")

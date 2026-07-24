@@ -137,6 +137,67 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(details["node_errors"], {})
             self.assertEqual(details["errors"], errors)
 
+    def test_slicer_and_peak_normalize_nodes_validate_as_audio_transforms(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "song.wav"
+            source.write_bytes(b"audio")
+            workflow = Workflow.model_validate(
+                {
+                    "nodes": [
+                        {"id": "input", "type": "input_file", "data": {"path": str(source)}},
+                        {
+                            "id": "slice",
+                            "type": "slicer",
+                            "data": {
+                                "config": {
+                                    "threshold": -45,
+                                    "min_length": 5000,
+                                    "min_interval": 300,
+                                    "hop_size": 10,
+                                    "max_sil_kept": 1000,
+                                    "output_format": "wav",
+                                }
+                            },
+                        },
+                        {"id": "normalize", "type": "peak_normalize", "data": {"target_peak_db": -3}},
+                        {"id": "output", "type": "output_folder", "data": {"path": str(root / "outputs")}},
+                    ],
+                    "edges": [
+                        {"source": "input", "target": "slice"},
+                        {"source": "slice", "target": "normalize"},
+                        {"source": "normalize", "target": "output"},
+                    ],
+                }
+            )
+            self.assertEqual(workflow.nodes[1].data["threshold"], -45)
+            self.assertEqual(validate_workflow(workflow, _Registry()), [])
+
+    def test_invalid_audio_transform_settings_are_keyed_by_node_id(self) -> None:
+        workflow = Workflow.model_validate(
+            {
+                "nodes": [
+                    {"id": "input", "type": "input_folder", "data": {"path": "."}},
+                    {
+                        "id": "slice",
+                        "type": "slicer",
+                        "data": {"min_length": 10, "min_interval": 20, "hop_size": 30},
+                    },
+                    {"id": "normalize", "type": "peak_normalize", "data": {"target_peak_db": 1}},
+                    {"id": "output", "type": "output_folder", "data": {"path": "outputs"}},
+                ],
+                "edges": [
+                    {"source": "input", "target": "slice"},
+                    {"source": "slice", "target": "normalize"},
+                    {"source": "normalize", "target": "output"},
+                ],
+            }
+        )
+        details = validate_workflow_detailed(workflow, _Registry())
+        self.assertFalse(details["valid"])
+        self.assertIn("slice", details["node_errors"])
+        self.assertIn("normalize", details["node_errors"])
+
     def test_missing_node_values_are_keyed_by_node_id(self) -> None:
         workflow = Workflow.model_validate(
             {

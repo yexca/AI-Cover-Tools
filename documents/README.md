@@ -35,6 +35,8 @@ Implemented WebUI node types:
 - Single audio file input
 - Audio folder input
 - Model-based separator
+- Audio slicer
+- Peak normalizer
 - Output folder
 
 Main runnable entry points:

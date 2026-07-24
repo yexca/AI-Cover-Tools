@@ -52,6 +52,8 @@ Supported node types:
 | `input_file` | none | `audio` | `path` |
 | `input_folder` | none | `audio` | `path`, `recursive`, `extensions` |
 | `separator` | `audio` | model stems | `model_filename`, `options` |
+| `slicer` | `audio` | `audio` | `threshold`, `min_length`, `min_interval`, `hop_size`, `max_sil_kept`, `output_format` |
+| `peak_normalize` | `audio` | `audio` | `target_peak_db` |
 | `output_folder` | `audio` | none | `path`, `naming_template`, `format`, `conflict` |
 
 Model stem names are execution handles. Preserve the exact registry value, including spaces and capitalization. Translate or format visible labels only; never normalize a handle independently in the frontend.
@@ -156,6 +158,8 @@ Validation checks:
 - input/output port contracts
 - forbidden incoming or outgoing edges
 - required separator and output inputs
+- valid slicer timing relationships and output format
+- peak-normalization targets between `-60` and `0 dB`
 - graph cycles
 
 Runs are submitted to a `RunManager` with one worker. This prevents concurrent model jobs from competing for the GPU. The frontend keeps one global server-sent event connection at `/api/events/runs`; `/api/runs/{run_id}/events` remains available for a single-run consumer. Both streams support `Last-Event-ID` resume semantics.
@@ -164,8 +168,10 @@ Execution stages:
 
 1. Read a single audio file or recursively scan an input folder.
 2. Execute separator nodes through `python-audio-separator`.
-3. Route artifacts by exact output stem handle.
-4. Copy or convert files into output folders.
+3. Slice audio nodes into one or more clips under the run's intermediate directory.
+4. Peak-normalize audio nodes with `ffmpeg-normalize` while preserving artifact metadata.
+5. Route artifacts by exact output stem handle.
+6. Copy or convert files into output folders.
 
 Output templates may use:
 
@@ -178,7 +184,7 @@ Output templates may use:
 
 Conflict modes are `rename`, `overwrite`, and `skip`. Output paths are checked so naming templates cannot escape the selected output root.
 
-Cancellation is cooperative. It is checked between files and nodes; an active model call may need to finish before cancellation takes effect.
+Cancellation is cooperative. It is checked between files and nodes; an active model, slicing, or normalization operation may need to finish before cancellation takes effect.
 The frontend keeps the run in a cancelling state until the server reports a terminal cancellation event.
 
 The Runs dialog shows the current single-worker queue and persisted run history. Each submitted run retains an immutable workflow snapshot. On reload, the frontend reconciles the active workflow tab with the server run snapshot and keeps receiving global run events; it does not depend on a browser-stored active run ID. Background workflow tabs show their run state, and any active run can be selected from the run list for tracking or cancellation.

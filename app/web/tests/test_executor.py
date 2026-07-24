@@ -6,6 +6,7 @@ import tempfile
 import threading
 import time
 import unittest
+import wave
 from pathlib import Path
 from unittest.mock import patch
 
@@ -48,6 +49,59 @@ class ExecutorTests(unittest.TestCase):
 
             self.assertEqual(state["status"], "completed")
             self.assertEqual((output / "song_audio.wav").read_bytes(), source.read_bytes())
+
+    def test_slicer_and_peak_normalize_chain_routes_generated_audio(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "song.wav"
+            with wave.open(str(source), "wb") as stream:
+                stream.setnchannels(1)
+                stream.setsampwidth(2)
+                stream.setframerate(16000)
+                stream.writeframes(b"\x00\x00" * 1600)
+            output = root / "output"
+            manager = RunManager(ModelRegistry(root / "models", root / "registry.json"), root / "runs")
+            workflow = Workflow.model_validate(
+                {
+                    "id": "prepare-test",
+                    "nodes": [
+                        {"id": "input", "type": "input_file", "data": {"path": str(source)}},
+                        {"id": "slice", "type": "slicer", "data": {"output_format": "wav"}},
+                        {"id": "normalize", "type": "peak_normalize", "data": {"target_peak_db": -3}},
+                        {
+                            "id": "output",
+                            "type": "output_folder",
+                            "data": {"path": str(output), "naming_template": "{basename}_{stem}.{ext}", "format": "same"},
+                        },
+                    ],
+                    "edges": [
+                        {"source": "input", "target": "slice"},
+                        {"source": "slice", "target": "normalize"},
+                        {"source": "normalize", "target": "output"},
+                    ],
+                }
+            )
+
+            def fake_normalize(source_path: Path, destination_path: Path, _target: float) -> Path:
+                destination_path.parent.mkdir(parents=True, exist_ok=True)
+                destination_path.write_bytes(source_path.read_bytes())
+                return destination_path
+
+            try:
+                with patch("app.tools.normalize_audio_file", side_effect=fake_normalize):
+                    run_id = manager.submit(workflow)["id"]
+                    deadline = time.monotonic() + 5
+                    while time.monotonic() < deadline:
+                        state = manager.get(run_id)
+                        if state and state["status"] in {"completed", "failed", "cancelled"}:
+                            break
+                        time.sleep(0.02)
+            finally:
+                manager.shutdown()
+
+            self.assertEqual(state["status"], "completed", state.get("error"))
+            self.assertTrue((output / "song_000_audio.wav").is_file())
+            self.assertEqual(state["outputs"], [str(output / "song_000_audio.wav")])
 
     def test_run_list_reports_queue_position_and_truthful_cancellation(self) -> None:
         class BlockingRunManager(RunManager):

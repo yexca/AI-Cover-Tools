@@ -13,7 +13,14 @@ def utc_now() -> str:
 
 class WorkflowNode(BaseModel):
     id: str
-    type: Literal["input_file", "input_folder", "separator", "output_folder"]
+    type: Literal[
+        "input_file",
+        "input_folder",
+        "separator",
+        "slicer",
+        "peak_normalize",
+        "output_folder",
+    ]
     data: dict[str, Any] = Field(default_factory=dict)
     position: dict[str, float] | None = None
 
@@ -47,6 +54,12 @@ class WorkflowNode(BaseModel):
             options = self.data.setdefault("options", {})
             if config.get("output_format"):
                 options.setdefault("output_format", str(config["output_format"]).upper())
+        elif self.type == "slicer":
+            for key in ("threshold", "min_length", "min_interval", "hop_size", "max_sil_kept", "output_format"):
+                if key in config:
+                    self.data.setdefault(key, config[key])
+        elif self.type == "peak_normalize" and "target_peak_db" in config:
+            self.data.setdefault("target_peak_db", config["target_peak_db"])
         return self
 
 

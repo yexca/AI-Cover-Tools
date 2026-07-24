@@ -225,9 +225,9 @@ def validate_workflow_detailed(workflow: Workflow, registry: ModelRegistry) -> d
             add_edge(edge.id, f"Input node {edge.target} cannot have incoming edges")
         source_handle = edge.source_handle or "audio"
         target_handle = edge.target_handle or "audio"
-        if source_type in {"input_file", "input_folder"} and source_handle != "audio":
-            add_edge(edge.id, f"Input node {edge.source} has no output port: {source_handle}")
-        if target_type in {"separator", "output_folder"} and target_handle != "audio":
+        if source_type in {"input_file", "input_folder", "slicer", "peak_normalize"} and source_handle != "audio":
+            add_edge(edge.id, f"Node {edge.source} has no output port: {source_handle}")
+        if target_type in {"separator", "slicer", "peak_normalize", "output_folder"} and target_handle != "audio":
             add_edge(edge.id, f"Node {edge.target} has no input port: {target_handle}")
 
     for node in workflow.nodes:
@@ -272,6 +272,37 @@ def validate_workflow_detailed(workflow: Workflow, registry: ModelRegistry) -> d
                             add_edge(edge.id, f"Separator node {node.id} has no output stem: {source_handle}")
             if not incoming[node.id]:
                 add_node(node.id, f"Separator node {node.id} has no audio input")
+        elif node.type == "slicer":
+            if not incoming[node.id]:
+                add_node(node.id, f"Slicer node {node.id} has no audio input")
+            output_format = str(data.get("output_format") or "wav").lower().lstrip(".")
+            if output_format not in {"wav", "flac", "mp3"}:
+                add_node(node.id, f"Slicer node {node.id} uses an unsupported output format: {output_format}")
+            try:
+                threshold = float(data.get("threshold", -40.0))
+                min_length = int(data.get("min_length", 5000))
+                min_interval = int(data.get("min_interval", 300))
+                hop_size = int(data.get("hop_size", 10))
+                max_sil_kept = int(data.get("max_sil_kept", 1000))
+            except (TypeError, ValueError):
+                add_node(node.id, f"Slicer node {node.id} has invalid numeric settings")
+            else:
+                if not -120.0 <= threshold <= 0.0:
+                    add_node(node.id, f"Slicer node {node.id} threshold must be between -120 and 0 dB")
+                if not min_length >= min_interval >= hop_size > 0:
+                    add_node(node.id, f"Slicer node {node.id} requires min_length >= min_interval >= hop_size > 0")
+                if max_sil_kept < hop_size:
+                    add_node(node.id, f"Slicer node {node.id} requires max_sil_kept >= hop_size")
+        elif node.type == "peak_normalize":
+            if not incoming[node.id]:
+                add_node(node.id, f"Peak normalize node {node.id} has no audio input")
+            try:
+                target_peak_db = float(data.get("target_peak_db", -3.0))
+            except (TypeError, ValueError):
+                add_node(node.id, f"Peak normalize node {node.id} has an invalid target peak")
+            else:
+                if not -60.0 <= target_peak_db <= 0.0:
+                    add_node(node.id, f"Peak normalize node {node.id} target peak must be between -60 and 0 dB")
         elif node.type == "output_folder":
             if not data.get("path"):
                 add_node(node.id, f"Output node {node.id} is missing path")

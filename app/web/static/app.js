@@ -43,15 +43,18 @@
   };
 
   const palette = {
-    input_file: '#4fc3df', input_folder: '#4fc3df', separator: '#9a6cf2', output_folder: '#54d69a'
+    input_file: '#4fc3df', input_folder: '#4fc3df', separator: '#9a6cf2',
+    slicer: '#f3a45f', peak_normalize: '#e66f8f', output_folder: '#54d69a'
   };
-  const icons = { input_file: '♪', input_folder: '▱', separator: '⌁', output_folder: '↳' };
+  const icons = { input_file: '♪', input_folder: '▱', separator: '⌁', slicer: '✂', peak_normalize: '↕', output_folder: '↳' };
   const nodeTypeKeys = {
     input_file: 'node.type.inputFile', input_folder: 'node.type.inputFolder',
-    separator: 'node.type.separator', output_folder: 'node.type.outputFolder'
+    separator: 'node.type.separator', slicer: 'node.type.slicer',
+    peak_normalize: 'node.type.peakNormalize', output_folder: 'node.type.outputFolder'
   };
   const nodeTitleKeys = {
     input_file: 'node.template.inputFile.title', input_folder: 'node.template.inputFolder.title',
+    slicer: 'node.template.slicer.title', peak_normalize: 'node.template.peakNormalize.title',
     output_folder: 'node.template.outputFolder.title'
   };
   const functionGroups = {
@@ -60,7 +63,7 @@
     denoise: 'denoise', noise_reduction: 'denoise', dereverb: 'dereverb', deecho: 'dereverb',
     karaoke: 'vocalCleanup', vocal_cleanup: 'vocalCleanup', unknown: 'needsConfirmation', other: 'other'
   };
-  const groupOrder = ['input','vocalSeparation','stemSeparation','denoise','dereverb','vocalCleanup','other','needsConfirmation','output'];
+  const groupOrder = ['input','vocalSeparation','stemSeparation','denoise','dereverb','vocalCleanup','preparation','other','needsConfirmation','output'];
   const nodeTypeLabel = type => t(nodeTypeKeys[type] || 'node.type.fallback');
   const functionGroup = value => functionGroups[value] || 'other';
   const functionLabel = value => t(`node.function.${functionGroup(value) === 'needsConfirmation' ? 'unknown' : functionGroup(value)}`);
@@ -410,6 +413,8 @@
     return [
       { type: 'input_file', title: t('node.template.inputFile.title'), subtitle: t('node.template.inputFile.description'), group: 'input', color: palette.input_file },
       { type: 'input_folder', title: t('node.template.inputFolder.title'), subtitle: t('node.template.inputFolder.description'), group: 'input', color: palette.input_folder },
+      { type: 'slicer', title: t('node.template.slicer.title'), subtitle: t('node.template.slicer.description'), group: 'preparation', color: palette.slicer },
+      { type: 'peak_normalize', title: t('node.template.peakNormalize.title'), subtitle: t('node.template.peakNormalize.description'), group: 'preparation', color: palette.peak_normalize },
       { type: 'output_folder', title: t('node.template.outputFolder.title'), subtitle: t('node.template.outputFolder.description'), group: 'output', color: palette.output_folder }
     ];
   }
@@ -468,6 +473,14 @@
       base.data.inputs = [{ id:'audio', label:'audio' }];
       base.data.outputs = model?.outputs || [{ id:'output', label:'output' }];
       base.data.config = { output_format:'wav', normalization_threshold:0.9 };
+    } else if (type === 'slicer') {
+      base.data.inputs = [{ id:'audio', label:'audio' }];
+      base.data.outputs = [{ id:'audio', label:'audio' }];
+      base.data.config = { threshold:-40, min_length:5000, min_interval:300, hop_size:10, max_sil_kept:1000, output_format:'wav' };
+    } else if (type === 'peak_normalize') {
+      base.data.inputs = [{ id:'audio', label:'audio' }];
+      base.data.outputs = [{ id:'audio', label:'audio' }];
+      base.data.config = { target_peak_db:-3 };
     }
     return base;
   }
@@ -515,6 +528,8 @@
     const info = node.type === 'separator'
       ? `<div class="node-info-row"><span>${escapeHtml(t('node.info.model'))}</span><strong title="${escapeHtml(node.data.model_filename)}">${escapeHtml(node.data.model_filename || nodeTitle(node))}</strong></div><div class="node-info-row"><span>${escapeHtml(t('node.info.architecture'))}</span><strong>${escapeHtml(node.data.architecture || t('model.architecture.unknown'))}</strong></div>`
       : node.type === 'input_folder' ? `<div class="node-info-row"><span>${escapeHtml(t('node.info.scan'))}</span><strong>${escapeHtml(t(node.data.config.recursive ? 'node.info.includeSubfolders' : 'node.info.currentFolder'))}</strong></div>`
+      : node.type === 'slicer' ? `<div class="node-info-row"><span>${escapeHtml(t('node.info.format'))}</span><strong>${escapeHtml((node.data.config.output_format || 'wav').toUpperCase())}</strong></div>`
+      : node.type === 'peak_normalize' ? `<div class="node-info-row"><span>${escapeHtml(t('node.info.targetPeak'))}</span><strong>${escapeHtml(String(node.data.config.target_peak_db ?? -3))} dB</strong></div>`
       : node.type === 'output_folder' ? `<div class="node-info-row"><span>${escapeHtml(t('node.info.format'))}</span><strong>${escapeHtml((node.data.config.format || 'wav').toUpperCase())}</strong></div>`
       : `<div class="node-info-row"><span>${escapeHtml(t('node.info.source'))}</span><strong>${escapeHtml(t(node.data.config.path ? 'node.info.selected' : 'node.info.notSelected'))}</strong></div>`;
     const inputs = getInputs(node).map(port => `<div class="port-row"><div class="port-label"><i class="port input" data-direction="input" data-port="${escapeHtml(port.id)}" style="--port-color:#55c9e5"></i><span>${escapeHtml(portLabel(node, port, 'input'))}</span></div></div>`).join('');
@@ -988,6 +1003,8 @@
     if (node.type === 'input_folder') fields = pathField('path',t('inspector.field.inputFolder'),c.path,t('inspector.field.inputFolder.example'),'input_directory') + field('include',t('inspector.field.fileFilter'),c.include,t('inspector.field.fileFilter.help'),'text') + selectField('recursive',t('inspector.field.recursive'),String(c.recursive),[['true',t('inspector.option.yes')],['false',t('inspector.option.no')]]);
     if (node.type === 'output_folder') fields = pathField('path',t('inspector.field.outputFolder'),c.path,t('inspector.field.outputFolder.example'),'output_directory') + field('naming',t('inspector.field.namingTemplate'),c.naming,t('inspector.field.namingTemplate.help'),'text') + `<div class="field-inline">${selectField('format',t('inspector.field.outputFormat'),c.format,[['wav','WAV'],['flac','FLAC'],['mp3','MP3']])}${selectField('conflict',t('inspector.field.conflict'),c.conflict,[['rename',t('inspector.option.rename')],['overwrite',t('inspector.option.overwrite')],['skip',t('inspector.option.skip')]])}</div>`;
     if (node.type === 'separator') fields = selectField('output_format',t('inspector.field.intermediateFormat'),c.output_format,[['wav','WAV'],['flac','FLAC']]) + field('normalization_threshold',t('inspector.field.peakLimit'),c.normalization_threshold ?? 0.9,t('inspector.field.peakLimit.help'),'number');
+    if (node.type === 'slicer') fields = selectField('output_format',t('inspector.field.intermediateFormat'),c.output_format,[['wav','WAV'],['flac','FLAC'],['mp3','MP3']]) + field('threshold',t('inspector.field.silenceThreshold'),c.threshold ?? -40,t('inspector.field.silenceThreshold.help'),'number') + field('min_length',t('inspector.field.minLength'),c.min_length ?? 5000,t('inspector.field.milliseconds'),'number') + field('min_interval',t('inspector.field.minInterval'),c.min_interval ?? 300,t('inspector.field.milliseconds'),'number') + field('hop_size',t('inspector.field.hopSize'),c.hop_size ?? 10,t('inspector.field.milliseconds'),'number') + field('max_sil_kept',t('inspector.field.maxSilenceKept'),c.max_sil_kept ?? 1000,t('inspector.field.milliseconds'),'number');
+    if (node.type === 'peak_normalize') fields = field('target_peak_db',t('inspector.field.targetPeak'),c.target_peak_db ?? -3,t('inspector.field.targetPeak.help'),'number');
     const model = node.type === 'separator' ? `<div class="inspector-section"><h2>${escapeHtml(t('inspector.section.model'))}</h2><div class="model-summary"><span class="template-icon" style="--item-color:${palette.separator}">⌁</span><div><b>${escapeHtml(nodeTitle(node))}</b><span>${escapeHtml(node.data.architecture)} · ${escapeHtml(functionLabel(node.data.function))}</span></div></div><div class="tag-list">${getOutputs(node).map(x => `<span class="tag">${escapeHtml(x.label)}</span>`).join('')}</div></div>` : '';
     const validationBlock = nodeValidation.length ? `<div class="inspector-section validation-section"><h2>${escapeHtml(t('validation.needsFix'))}</h2>${nodeValidation.map(error => `<div class="validation-item">${escapeHtml(friendlyValidationError(error))}</div>`).join('')}</div>` : '';
     refs.inspector.innerHTML = `${validationBlock}<div class="inspector-section"><h2>${escapeHtml(t('inspector.section.node'))}</h2>${field('__title',t('inspector.field.displayName'),nodeTitle(node),'','text')}<div class="field-inline">${field('__x',t('inspector.field.x'),node.data.x,'','number')}${field('__y',t('inspector.field.y'),node.data.y,'','number')}</div></div>${model}<div class="inspector-section"><h2>${escapeHtml(t('inspector.section.parameters'))}</h2>${fields || `<div class="field"><small>${escapeHtml(t('inspector.noEditableParameters'))}</small></div>`}</div><div class="inspector-section"><button class="danger-button" id="deleteNode">${escapeHtml(t('inspector.action.deleteNode'))}</button></div>`;
@@ -1022,12 +1039,16 @@
   }
 
   function updateNodeField(node, key, value, input = null) {
+    const numericValue = String(value).trim() === '' ? NaN : Number(value);
     if (key === '__title') {
       node.data.title = value.trim();
       node.data.title_customized = Boolean(node.data.title);
     }
     else if (key === '__x' || key === '__y') node.data[key.slice(2)] = Number(value) || 0;
     else if (key === 'normalization_threshold') node.data.config[key] = Math.min(1, Math.max(0.01, Number(value) || 0.9));
+    else if (key === 'threshold') node.data.config[key] = Math.min(0, Math.max(-120, Number.isFinite(numericValue) ? numericValue : -40));
+    else if (['min_length','min_interval','hop_size','max_sil_kept'].includes(key)) node.data.config[key] = Math.max(1, Math.round(Number.isFinite(numericValue) ? numericValue : 1));
+    else if (key === 'target_peak_db') node.data.config[key] = Math.min(0, Math.max(-60, Number.isFinite(numericValue) ? numericValue : -3));
     else if (key === 'path') node.data.config[key] = String(value ?? '').trim();
     else node.data.config[key] = value === 'true' ? true : value === 'false' ? false : value;
     if (input) {
@@ -1052,6 +1073,8 @@
     const summary = $('.node-info-row strong', element);
     if (summary && node.type === 'input_file') summary.textContent = t(node.data.config.path ? 'node.info.selected' : 'node.info.notSelected');
     if (summary && node.type === 'input_folder') summary.textContent = t(node.data.config.recursive ? 'node.info.includeSubfolders' : 'node.info.currentFolder');
+    if (summary && node.type === 'slicer') summary.textContent = String(node.data.config.output_format || 'wav').toUpperCase();
+    if (summary && node.type === 'peak_normalize') summary.textContent = `${node.data.config.target_peak_db ?? -3} dB`;
     if (summary && node.type === 'output_folder') summary.textContent = String(node.data.config.format || 'wav').toUpperCase();
     renderEdges(); drawMinimap();
   }
@@ -1148,6 +1171,15 @@
         node.data.outputs = getOutputs(node).map(port => port.id);
         node.data.options = { ...(node.data.options || {}), ...config };
       }
+      if (node.type === 'slicer') {
+        node.data.threshold = Number(config.threshold ?? -40);
+        node.data.min_length = Number(config.min_length ?? 5000);
+        node.data.min_interval = Number(config.min_interval ?? 300);
+        node.data.hop_size = Number(config.hop_size ?? 10);
+        node.data.max_sil_kept = Number(config.max_sil_kept ?? 1000);
+        node.data.output_format = config.output_format || 'wav';
+      }
+      if (node.type === 'peak_normalize') node.data.target_peak_db = Number(config.target_peak_db ?? -3);
       if (node.type === 'output_folder') {
         node.data.path = path;
         node.data.naming_template = config.naming || node.data.naming_template || '{relative_dir}/{basename}_{stem}.{ext}';
@@ -1286,11 +1318,14 @@
       if (node.type === 'separator') node.data.outputs = normalizeOutputs(node.data);
       if (node.type === 'input_file') node.data.outputs = normalizeOutputs({outputs:node.data.outputs || [{id:'audio',label:'audio'}]});
       if (node.type === 'input_folder') node.data.outputs = normalizeOutputs({outputs:node.data.outputs || [{id:'audio',label:'audio'}]});
+      if (node.type === 'slicer' || node.type === 'peak_normalize') { node.data.inputs = node.data.inputs || [{id:'audio',label:'audio'}]; node.data.outputs = node.data.outputs || [{id:'audio',label:'audio'}]; }
       if (node.type === 'output_folder') node.data.inputs = node.data.inputs || [{id:'audio',label:'audio'}];
       node.data.config=node.data.config||{};
       if (node.type === 'input_file') node.data.config.path = String(node.data.config.path ?? node.data.path ?? '').trim();
       if (node.type === 'input_folder') { node.data.config.path = String(node.data.config.path ?? node.data.path ?? '').trim(); node.data.config.recursive ??= node.data.recursive ?? true; node.data.config.include ??= (node.data.extensions || []).map(ext=>`*${ext}`).join(';'); }
       if (node.type === 'separator') node.data.config = {...(node.data.options || {}),...node.data.config};
+      if (node.type === 'slicer') node.data.config = {threshold:node.data.threshold ?? -40,min_length:node.data.min_length ?? 5000,min_interval:node.data.min_interval ?? 300,hop_size:node.data.hop_size ?? 10,max_sil_kept:node.data.max_sil_kept ?? 1000,output_format:node.data.output_format || 'wav',...node.data.config};
+      if (node.type === 'peak_normalize') node.data.config = {target_peak_db:node.data.target_peak_db ?? -3,...node.data.config};
       if (node.type === 'output_folder') { node.data.config = {path:node.data.path || '',naming:node.data.naming_template || '{basename}_{stem}.{ext}',format:node.data.format || 'wav',conflict:node.data.conflict || 'rename',...node.data.config}; node.data.config.path = String(node.data.config.path ?? '').trim(); }
     });
     payload.edges.forEach(edge => { edge.id ||= uid('edge'); });
@@ -1403,6 +1438,10 @@
     if (/Input folder path is not a directory/i.test(text)) return t('validation.inputPathNotFolder');
     if (/Output path is not a directory/i.test(text)) return t('validation.outputPathNotFolder');
     if (/Separator node .* has no audio input/i.test(text)) return t('validation.separatorMissingInput');
+    if (/Slicer node .* has no audio input/i.test(text)) return t('validation.slicerMissingInput');
+    if (/Peak normalize node .* has no audio input/i.test(text)) return t('validation.peakNormalizeMissingInput');
+    if (/Slicer node .* (?:has invalid|requires|threshold|uses an unsupported)/i.test(text)) return t('validation.slicerSettingsInvalid');
+    if (/Peak normalize node .* (?:has an invalid|target peak)/i.test(text)) return t('validation.peakNormalizeTargetInvalid');
     if (/Output node .* has no audio input/i.test(text)) return t('validation.outputMissingInput');
     if (/Workflow needs at least one input node/i.test(text)) return t('validation.workflowMissingInput');
     if (/Workflow needs at least one output node/i.test(text)) return t('validation.workflowMissingOutput');
