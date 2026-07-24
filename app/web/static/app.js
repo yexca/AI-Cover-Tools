@@ -33,7 +33,7 @@
 
   const refs = {
     viewport: $('#viewport'), world: $('#world'), nodes: $('#nodesLayer'), svg: $('#connectionsSvg'),
-    library: $('#nodeLibrary'), inspector: $('#inspectorContent'), hint: $('#connectionHint'),
+    library: $('#nodeLibrary'), inspector: $('#inspectorContent'), hint: $('#connectionHint'), modelPreview: $('#modelPreview'),
     empty: $('#emptyCanvas'), minimap: $('#minimap canvas'), log: $('#activityLog'),
     progress: $('#runProgress'), progressBar: $('#runProgressBar'), activityState: $('#activityState'),
     workflowName: $('#workflowName'), canvasTitle: $('#canvasTitle'), zoomLabel: $('#zoomReset'),
@@ -61,12 +61,17 @@
     vocal_separation: 'vocalSeparation', vocals: 'vocalSeparation',
     stem_separation: 'stemSeparation', multi_stem: 'stemSeparation', multistem_separation: 'stemSeparation',
     denoise: 'denoise', noise_reduction: 'denoise', dereverb: 'dereverb', deecho: 'dereverb',
-    karaoke: 'vocalCleanup', vocal_cleanup: 'vocalCleanup', unknown: 'needsConfirmation', other: 'other'
+    karaoke: 'vocalCleanup', vocal_cleanup: 'vocalCleanup', unknown: 'other', other: 'other'
   };
-  const groupOrder = ['input','vocalSeparation','stemSeparation','denoise','dereverb','vocalCleanup','preparation','other','needsConfirmation','output'];
+  const functionSections = {
+    vocalSeparation: 'separation', stemSeparation: 'separation',
+    denoise: 'cleanup', dereverb: 'cleanup', vocalCleanup: 'cleanup', other: 'other'
+  };
+  const groupOrder = ['input','preparation','separation','cleanup','other','output'];
+  const subgroupOrder = ['vocalSeparation','stemSeparation','denoise','dereverb','vocalCleanup','other'];
   const nodeTypeLabel = type => t(nodeTypeKeys[type] || 'node.type.fallback');
   const functionGroup = value => functionGroups[value] || 'other';
-  const functionLabel = value => t(`node.function.${functionGroup(value) === 'needsConfirmation' ? 'unknown' : functionGroup(value)}`);
+  const functionLabel = value => t(`node.function.${value === 'unknown' ? 'unknown' : functionGroup(value)}`);
   const groupLabel = group => t(`group.${group}`);
 
   const state = {
@@ -117,13 +122,15 @@
     const filename = raw.filename || raw.file || raw.model_filename || raw.id || `model-${index + 1}`;
     const architecture = raw.architecture || raw.arch || raw.type || raw.model_type || 'Unknown';
     const installed = raw.installed ?? raw.is_installed ?? raw.local ?? raw.available_locally ?? true;
+    const needsConfirmation = Boolean(raw.needs_confirmation ?? raw.needsConfirmation);
     const model = {
       id: String(raw.id || filename), filename: String(filename),
       name: String(raw.display_name || raw.friendly_name || raw.name || filename.replace(/\.(ckpt|pth|pt|onnx)$/i, '')),
       architecture: String(architecture), installed: Boolean(installed), outputs: normalizeOutputs(raw),
-      confidence: raw.confidence || raw.metadata_confidence || 'unknown', source: raw.metadata_source || raw.source || ''
+      confidence: raw.confidence || raw.metadata_confidence || 'unknown', source: raw.metadata_source || raw.source || '',
+      needsConfirmation
     };
-    model.function = raw.needs_confirmation ? 'unknown' : inferFunction({...raw, ...model});
+    model.function = inferFunction({...raw, ...model});
     return model;
   }
 
@@ -419,6 +426,51 @@
     ];
   }
 
+  let modelPreviewTimer = null;
+
+  function hideModelPreview() {
+    clearTimeout(modelPreviewTimer);
+    modelPreviewTimer = null;
+    refs.modelPreview.classList.add('hidden');
+  }
+
+  function modelPreviewHtml(model) {
+    const outputs = model.needsConfirmation ? t('model.preview.outputsUnknown') : model.outputs.map(output => output.label).join(' / ');
+    const confidenceKey = ['high','medium','low'].includes(model.confidence) ? model.confidence : 'unknown';
+    return `${model.needsConfirmation ? `<div class="model-preview-warning">! ${escapeHtml(t('model.status.needsConfirmation'))}</div>` : ''}
+      <div class="model-preview-heading"><span class="template-icon" style="--item-color:${palette.separator}">${icons.separator}</span><div><b>${escapeHtml(model.name)}</b><span>${escapeHtml(functionLabel(model.function))}</span></div></div>
+      <dl class="model-preview-details">
+        <div><dt>${escapeHtml(t('model.preview.filename'))}</dt><dd>${escapeHtml(model.filename)}</dd></div>
+        <div><dt>${escapeHtml(t('node.info.architecture'))}</dt><dd>${escapeHtml(model.architecture)}</dd></div>
+        <div><dt>${escapeHtml(t('model.preview.outputs'))}</dt><dd>${escapeHtml(outputs)}</dd></div>
+        <div><dt>${escapeHtml(t('model.preview.metadata'))}</dt><dd>${escapeHtml(model.source || t('model.metadata.unknown'))} · ${escapeHtml(t(`model.confidence.${confidenceKey}`))}</dd></div>
+      </dl>`;
+  }
+
+  function showModelPreview(template, model) {
+    refs.modelPreview.innerHTML = modelPreviewHtml(model);
+    refs.modelPreview.classList.remove('hidden');
+    const row = template.getBoundingClientRect();
+    const preview = refs.modelPreview.getBoundingClientRect();
+    let left = row.right + 8;
+    if (left + preview.width > window.innerWidth - 12) left = Math.max(12, row.left - preview.width - 8);
+    const top = Math.min(Math.max(12, row.top), window.innerHeight - preview.height - 12);
+    refs.modelPreview.style.left = `${Math.round(left)}px`;
+    refs.modelPreview.style.top = `${Math.round(Math.max(12, top))}px`;
+  }
+
+  function scheduleModelPreview(template, model) {
+    clearTimeout(modelPreviewTimer);
+    modelPreviewTimer = setTimeout(() => showModelPreview(template, model), 320);
+  }
+
+  function libraryTemplateHtml(item) {
+    const unavailable = Boolean(item.model?.needsConfirmation);
+    return `<div class="node-template${unavailable ? ' needs-confirmation' : ''}" draggable="${!unavailable}" role="button" tabindex="0" aria-disabled="${unavailable}" data-template-id="${escapeHtml(item.model?.id || item.type)}" data-type="${item.type}" style="--item-color:${item.color}">
+      <span class="template-icon">${icons[item.type]}</span><span class="template-copy"><b title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</b><span title="${escapeHtml(item.subtitle)}">${escapeHtml(item.subtitle)}</span></span>${unavailable ? `<span class="template-status" title="${escapeHtml(t('model.status.needsConfirmation'))}">!</span>` : '<span class="drag-dots">⠿</span>'}
+    </div>`;
+  }
+
   function renderLibrary() {
     const search = $('#modelSearch').value.trim().toLowerCase();
     const architecture = $('#architectureFilter').value;
@@ -435,24 +487,48 @@
       groups.get(item.group).push(item);
     });
     installed.filter(model => (!architecture || model.architecture === architecture) && matches({ title:model.name, subtitle:functionLabel(model.function), architecture:model.architecture })).forEach(model => {
-      const group = functionGroup(model.function);
+      const subgroup = functionGroup(model.function);
+      const group = functionSections[subgroup] || 'other';
       if (!groups.has(group)) groups.set(group, []);
-      groups.get(group).push({ type: 'separator', title: model.name, subtitle: `${model.architecture} · ${model.outputs.map(x => x.label).join(' / ')}`, group, model, color: palette.separator });
+      const outputs = model.needsConfirmation ? t('model.preview.outputsUnknown') : model.outputs.map(x => x.label).join(' / ');
+      groups.get(group).push({ type: 'separator', title: model.name, subtitle: `${model.architecture} · ${outputs}`, group, subgroup, model, color: palette.separator });
     });
     const html = groupOrder.filter(group => groups.has(group)).map(group => {
       const items = groups.get(group);
+      const directItems = items.filter(item => !item.subgroup);
+      const nestedItems = subgroupOrder.filter(subgroup => items.some(item => item.subgroup === subgroup)).map(subgroup => {
+        const subgroupItems = items.filter(item => item.subgroup === subgroup);
+        return `<section class="library-subgroup"><div class="subgroup-heading"><span>${escapeHtml(groupLabel(subgroup))}</span><em>${i18n.formatNumber(subgroupItems.length)}</em></div>${subgroupItems.map(libraryTemplateHtml).join('')}</section>`;
+      }).join('');
       return `<section class="library-group" data-group="${escapeHtml(group)}">
         <button class="group-heading"><span>${escapeHtml(groupLabel(group))} <em>${i18n.formatNumber(items.length)}</em></span><span>⌄</span></button>
-        <div class="group-items">${items.map(item => `<div class="node-template" draggable="true" data-template-id="${escapeHtml(item.model?.id || item.type)}" data-type="${item.type}" style="--item-color:${item.color}">
-          <span class="template-icon">${icons[item.type]}</span><span class="template-copy"><b title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</b><span title="${escapeHtml(item.subtitle)}">${escapeHtml(item.subtitle)}</span></span><span class="drag-dots">⠿</span>
-        </div>`).join('')}</div></section>`;
+        <div class="group-items">${directItems.map(libraryTemplateHtml).join('')}${nestedItems}</div></section>`;
     }).join('');
     refs.library.innerHTML = html || `<div class="empty-library">${escapeHtml(t('library.models.empty')).replace(/\n/g, '<br>')}</div>`;
     $$('.group-heading', refs.library).forEach(button => button.addEventListener('click', () => button.closest('.library-group').classList.toggle('collapsed')));
     $$('.node-template', refs.library).forEach(template => {
-      template.addEventListener('dragstart', event => event.dataTransfer.setData('application/x-audioflow-node', JSON.stringify({ type: template.dataset.type, id: template.dataset.templateId })));
-      template.addEventListener('dblclick', () => addFromTemplate(template.dataset.type, template.dataset.templateId));
+      const model = template.dataset.type === 'separator' ? state.models.find(item => item.id === template.dataset.templateId) : null;
+      template.addEventListener('dragstart', event => {
+        if (template.getAttribute('aria-disabled') === 'true') return event.preventDefault();
+        event.dataTransfer.setData('application/x-audioflow-node', JSON.stringify({ type: template.dataset.type, id: template.dataset.templateId }));
+      });
+      template.addEventListener('dblclick', () => {
+        if (template.getAttribute('aria-disabled') !== 'true') addFromTemplate(template.dataset.type, template.dataset.templateId);
+      });
+      template.addEventListener('keydown', event => {
+        if ((event.key === 'Enter' || event.key === ' ') && template.getAttribute('aria-disabled') !== 'true') {
+          event.preventDefault();
+          addFromTemplate(template.dataset.type, template.dataset.templateId);
+        }
+      });
+      if (model) {
+        template.addEventListener('mouseenter', () => scheduleModelPreview(template, model));
+        template.addEventListener('mouseleave', hideModelPreview);
+        template.addEventListener('focus', () => scheduleModelPreview(template, model));
+        template.addEventListener('blur', hideModelPreview);
+      }
     });
+    refs.library.onscroll = hideModelPreview;
   }
 
   function makeNode(type, x, y, model = null) {
@@ -470,6 +546,8 @@
       base.data.model_filename = model?.filename || '';
       base.data.architecture = model?.architecture || 'Unknown';
       base.data.function = model?.function || 'unknown';
+      base.data.metadata_source = model?.source || '';
+      base.data.metadata_confidence = model?.confidence || 'unknown';
       base.data.inputs = [{ id:'audio', label:'audio' }];
       base.data.outputs = model?.outputs || [{ id:'output', label:'output' }];
       base.data.config = { output_format:'wav', normalization_threshold:0.9 };
@@ -486,6 +564,7 @@
   }
 
   function addFromTemplate(type, templateId, position = null) {
+    hideModelPreview();
     flushActiveInspectorField();
     resetGraphInteractions();
     const center = screenToWorld(refs.viewport.clientWidth * .45, refs.viewport.clientHeight * .42);
@@ -526,7 +605,7 @@
     const typeLabel = node.type === 'separator' ? functionLabel(node.data.function) : nodeTypeLabel(node.type);
     const validationErrors = state.validation.nodeErrors[node.id] || [];
     const info = node.type === 'separator'
-      ? `<div class="node-info-row"><span>${escapeHtml(t('node.info.model'))}</span><strong title="${escapeHtml(node.data.model_filename)}">${escapeHtml(node.data.model_filename || nodeTitle(node))}</strong></div><div class="node-info-row"><span>${escapeHtml(t('node.info.architecture'))}</span><strong>${escapeHtml(node.data.architecture || t('model.architecture.unknown'))}</strong></div>`
+      ? ''
       : node.type === 'input_folder' ? `<div class="node-info-row"><span>${escapeHtml(t('node.info.scan'))}</span><strong>${escapeHtml(t(node.data.config.recursive ? 'node.info.includeSubfolders' : 'node.info.currentFolder'))}</strong></div>`
       : node.type === 'slicer' ? `<div class="node-info-row"><span>${escapeHtml(t('node.info.format'))}</span><strong>${escapeHtml((node.data.config.output_format || 'wav').toUpperCase())}</strong></div>`
       : node.type === 'peak_normalize' ? `<div class="node-info-row"><span>${escapeHtml(t('node.info.targetPeak'))}</span><strong>${escapeHtml(String(node.data.config.target_peak_db ?? -3))} dB</strong></div>`
@@ -535,9 +614,8 @@
     const inputs = getInputs(node).map(port => `<div class="port-row"><div class="port-label"><i class="port input" data-direction="input" data-port="${escapeHtml(port.id)}" style="--port-color:#55c9e5"></i><span>${escapeHtml(portLabel(node, port, 'input'))}</span></div></div>`).join('');
     const outputs = getOutputs(node).map((port, i) => `<div class="port-row"><div class="port-label output"><span>${escapeHtml(portLabel(node, port, 'output'))}</span><i class="port output" data-direction="output" data-port="${escapeHtml(port.id)}" style="--port-color:${i % 2 ? '#f3a45f' : '#9a6cf2'}"></i></div></div>`).join('');
     return `<article class="node ${state.selectedNode === node.id ? 'selected' : ''} ${validationErrors.length ? 'validation-error' : ''}" data-node-id="${node.id}" title="${escapeHtml(validationErrors.length ? friendlyValidationError(validationErrors[0]) : '')}" style="left:${node.data.x}px;top:${node.data.y}px;--node-color:${palette[node.type] || palette.separator}">
-      <header class="node-header"><span class="node-header-icon">${icons[node.type] || '◇'}</span><span class="node-title"><b>${escapeHtml(nodeTitle(node))}</b><span>${escapeHtml(typeLabel)}</span></span>${validationErrors.length ? '<span class="node-error-mark">!</span>' : ''}<button class="node-menu" title="${escapeHtml(t('node.action.delete'))}">•••</button></header>
-      <div class="node-body"><div class="node-info">${info}</div>${inputs}${outputs}</div>
-      <footer class="node-footer"><span class="node-badge">${node.type === 'separator' ? escapeHtml(node.data.architecture || 'MODEL') : escapeHtml(node.type.replace('_',' '))}</span><button class="node-remove" title="${escapeHtml(t('node.action.delete'))}">×</button></footer>
+      <header class="node-header"><span class="node-header-icon">${icons[node.type] || '◇'}</span><span class="node-title"><b title="${escapeHtml(nodeTitle(node))}">${escapeHtml(nodeTitle(node))}</b><span>${escapeHtml(typeLabel)}</span></span>${validationErrors.length ? '<span class="node-error-mark">!</span>' : ''}<button class="node-menu" title="${escapeHtml(t('node.action.delete'))}">×</button></header>
+      <div class="node-body">${info ? `<div class="node-info">${info}</div>` : ''}${inputs}${outputs}</div>
     </article>`;
   }
 
@@ -1005,7 +1083,11 @@
     if (node.type === 'separator') fields = selectField('output_format',t('inspector.field.intermediateFormat'),c.output_format,[['wav','WAV'],['flac','FLAC']]) + field('normalization_threshold',t('inspector.field.peakLimit'),c.normalization_threshold ?? 0.9,t('inspector.field.peakLimit.help'),'number');
     if (node.type === 'slicer') fields = selectField('output_format',t('inspector.field.intermediateFormat'),c.output_format,[['wav','WAV'],['flac','FLAC'],['mp3','MP3']]) + field('threshold',t('inspector.field.silenceThreshold'),c.threshold ?? -40,t('inspector.field.silenceThreshold.help'),'number') + field('min_length',t('inspector.field.minLength'),c.min_length ?? 5000,t('inspector.field.milliseconds'),'number') + field('min_interval',t('inspector.field.minInterval'),c.min_interval ?? 300,t('inspector.field.milliseconds'),'number') + field('hop_size',t('inspector.field.hopSize'),c.hop_size ?? 10,t('inspector.field.milliseconds'),'number') + field('max_sil_kept',t('inspector.field.maxSilenceKept'),c.max_sil_kept ?? 1000,t('inspector.field.milliseconds'),'number');
     if (node.type === 'peak_normalize') fields = field('target_peak_db',t('inspector.field.targetPeak'),c.target_peak_db ?? -3,t('inspector.field.targetPeak.help'),'number');
-    const model = node.type === 'separator' ? `<div class="inspector-section"><h2>${escapeHtml(t('inspector.section.model'))}</h2><div class="model-summary"><span class="template-icon" style="--item-color:${palette.separator}">⌁</span><div><b>${escapeHtml(nodeTitle(node))}</b><span>${escapeHtml(node.data.architecture)} · ${escapeHtml(functionLabel(node.data.function))}</span></div></div><div class="tag-list">${getOutputs(node).map(x => `<span class="tag">${escapeHtml(x.label)}</span>`).join('')}</div></div>` : '';
+    const modelRecord = node.type === 'separator' ? state.models.find(item => item.id === node.data.model_id || item.filename === node.data.model_filename) : null;
+    const modelConfidence = node.data.metadata_confidence || modelRecord?.confidence || 'unknown';
+    const confidenceKey = ['high','medium','low'].includes(modelConfidence) ? modelConfidence : 'unknown';
+    const metadataSource = node.data.metadata_source || modelRecord?.source || t('model.metadata.unknown');
+    const model = node.type === 'separator' ? `<div class="inspector-section"><h2>${escapeHtml(t('inspector.section.model'))}</h2><div class="model-summary"><span class="template-icon" style="--item-color:${palette.separator}">⌁</span><div><b title="${escapeHtml(nodeTitle(node))}">${escapeHtml(nodeTitle(node))}</b><span>${escapeHtml(node.data.architecture)} · ${escapeHtml(functionLabel(node.data.function))}</span></div></div><dl class="model-details"><div><dt>${escapeHtml(t('model.preview.filename'))}</dt><dd title="${escapeHtml(node.data.model_filename)}">${escapeHtml(node.data.model_filename)}</dd></div><div><dt>${escapeHtml(t('model.preview.metadata'))}</dt><dd>${escapeHtml(metadataSource)} · ${escapeHtml(t(`model.confidence.${confidenceKey}`))}</dd></div></dl><div class="tag-list">${getOutputs(node).map(x => `<span class="tag">${escapeHtml(x.label)}</span>`).join('')}</div></div>` : '';
     const validationBlock = nodeValidation.length ? `<div class="inspector-section validation-section"><h2>${escapeHtml(t('validation.needsFix'))}</h2>${nodeValidation.map(error => `<div class="validation-item">${escapeHtml(friendlyValidationError(error))}</div>`).join('')}</div>` : '';
     refs.inspector.innerHTML = `${validationBlock}<div class="inspector-section"><h2>${escapeHtml(t('inspector.section.node'))}</h2>${field('__title',t('inspector.field.displayName'),nodeTitle(node),'','text')}<div class="field-inline">${field('__x',t('inspector.field.x'),node.data.x,'','number')}${field('__y',t('inspector.field.y'),node.data.y,'','number')}</div></div>${model}<div class="inspector-section"><h2>${escapeHtml(t('inspector.section.parameters'))}</h2>${fields || `<div class="field"><small>${escapeHtml(t('inspector.noEditableParameters'))}</small></div>`}</div><div class="inspector-section"><button class="danger-button" id="deleteNode">${escapeHtml(t('inspector.action.deleteNode'))}</button></div>`;
     $$('input[data-field],select[data-field]', refs.inspector).forEach(input => bindInspectorField(input, node));

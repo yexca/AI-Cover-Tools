@@ -56,6 +56,21 @@ class I18nTests(unittest.TestCase):
         self.assertIn("node.type === 'slicer'", source)
         self.assertIn("node.type === 'peak_normalize'", source)
 
+    def test_model_taxonomy_keeps_confirmation_as_status(self) -> None:
+        source = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+        self.assertIn("unknown: 'other'", source)
+        self.assertIn("const functionSections", source)
+        self.assertIn("needsConfirmation", source)
+        self.assertIn("aria-disabled=\"${unavailable}\"", source)
+        self.assertNotIn("unknown: 'needsConfirmation'", source)
+
+    def test_model_library_has_on_demand_details(self) -> None:
+        source = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+        index = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+        self.assertIn("function modelPreviewHtml", source)
+        self.assertIn("function scheduleModelPreview", source)
+        self.assertIn('id="modelPreview"', index)
+
     def test_frontend_exposes_workflow_and_run_management(self) -> None:
         source = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
         index = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
