@@ -2,6 +2,8 @@
 
 This project is growing page by page. Keep changes scoped to the module that owns the behavior.
 
+Repository-wide agent rules live in [`AGENTS.md`](../AGENTS.md). UI work must also follow [`DESIGN.md`](../DESIGN.md). This document keeps the shorter implementation patterns and verification notes for human and agent contributors.
+
 ## General Rules
 
 - GUI code lives under `app/gui`.

@@ -2,6 +2,8 @@
 
 This folder is the source of truth for the current project structure and behavior.
 
+Coding agents must first read the repository-level [agent instructions](../AGENTS.md). User-facing desktop or WebUI changes must also follow the [design system](../DESIGN.md). These root files define working and design constraints; the documents below describe each subsystem's current behavior.
+
 ## Map
 
 - [Architecture](architecture.md): package boundaries, data flow, and ownership rules.
@@ -13,6 +15,8 @@ This folder is the source of truth for the current project structure and behavio
 - [Tools](tools.md): audio quality, duration, pitch, and normalize utilities.
 - [Configuration](configuration.md): config loading, defaults, and pipeline keys.
 - [Development](development.md): implementation conventions and verification checklist.
+- [Agent Instructions](../AGENTS.md): repository-wide workflow, safety, architecture, and completion rules.
+- [Design System](../DESIGN.md): desktop and WebUI visual, interaction, responsive, i18n, and accessibility contracts.
 
 ## Current State
 
