@@ -93,7 +93,11 @@ class WorkflowTests(unittest.TestCase):
                 "id": "workflow-1",
                 "name": "Vocal split",
                 "nodes": [
-                    {"id": "input", "type": "file_input", "data": {"config": {"path": str(source)}}},
+                    {
+                        "id": "input",
+                        "type": "file_input",
+                        "data": {"width": 310, "height": 180, "config": {"path": str(source)}},
+                    },
                     {"id": "split", "type": "separator", "data": {"model_filename": "test.ckpt", "config": {"output_format": "wav"}}},
                     {"id": "output", "type": "output", "data": {"config": {"path": str(root / "outputs"), "naming": "{basename}_{stem}.{ext}"}}},
                 ],
@@ -105,6 +109,8 @@ class WorkflowTests(unittest.TestCase):
             workflow = Workflow.model_validate(raw)
             self.assertEqual([node.type for node in workflow.nodes], ["input_file", "separator", "output_folder"])
             self.assertEqual(workflow.nodes[0].data["path"], str(source))
+            self.assertEqual(workflow.nodes[0].data["width"], 310)
+            self.assertEqual(workflow.nodes[0].data["height"], 180)
             self.assertEqual(workflow.nodes[2].data["naming_template"], "{basename}_{stem}.{ext}")
             self.assertEqual(validate_workflow(workflow, _Registry()), [])
             self.assertEqual(topological_order(workflow), ["input", "split", "output"])

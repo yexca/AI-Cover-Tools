@@ -285,10 +285,13 @@ The graph canvas is the primary work surface. Sidebars support it and should col
 #### Nodes
 
 - Default node width: 224 px; header height: 40 px; radius: 9 px.
+- A visible lower-right handle resizes node width and height. Resizing must follow canvas zoom, update connections and the minimap continuously, support keyboard arrow adjustments, and participate in workflow history and persistence.
 - Header color identifies type. Body content stays on the neutral panel surface.
 - Selection uses the node color plus a stronger border/shadow.
 - Running uses the node color as an active glow; validation errors use semantic red.
 - Titles and port labels elide visually but exact model filenames and stem handles remain in data.
+- File and folder summaries may show a compact basename for scanning, but preserve the complete path in the underlying data and an accessible detail surface.
+- The node-header delete action uses semantic red and requires an anchored confirmation popover; Cancel, Escape, and clicking outside dismiss it without deleting.
 - New nodes need a stable type, icon, title key, category, input/output contract, inspector editor, validation, execution support, and tests. A library-only card is not a completed node.
 
 #### Ports and Connections

@@ -22,6 +22,9 @@
     library: { min:220, max:520, defaultWidth:320 },
     inspector: { min:260, max:520, defaultWidth:360 }
   };
+  const NODE_SIZE_LIMITS = {
+    minWidth:180, maxWidth:520, minHeight:96, maxHeight:640, defaultWidth:224, defaultHeight:96
+  };
   const MAX_DRAFTS = 20;
 
   function readSidebarLayout() {
@@ -81,7 +84,7 @@
     inspectorVisible: !window.matchMedia('(max-width:800px)').matches,
     libraryWidth: Number(savedSidebarLayout.libraryWidth) || SIDEBAR_LIMITS.library.defaultWidth,
     inspectorWidth: Number(savedSidebarLayout.inspectorWidth) || SIDEBAR_LIMITS.inspector.defaultWidth,
-    transform: { x: 0, y: 0, scale: 1 }, panning: null, dragging: null,
+    transform: { x: 0, y: 0, scale: 1 }, panning: null, dragging: null, resizing: null,
     sidebarResize: null,
     history: [], historyIndex: -1, running: false, validatingWorkflowIds: new Set(), cancelling: false, runId: null, runStatus: null, eventSource: null, runRefreshTimer: null,
     validation: { nodeErrors: {}, edgeErrors: {}, globalErrors: [], errors: [] },
@@ -589,6 +592,36 @@
     return node.data.title_customized ? (node.data.title || defaultNodeTitle(node)) : defaultNodeTitle(node);
   }
 
+  function clampNodeDimension(value, key) {
+    const fallback = key === 'width' ? NODE_SIZE_LIMITS.defaultWidth : NODE_SIZE_LIMITS.defaultHeight;
+    const minimum = key === 'width' ? NODE_SIZE_LIMITS.minWidth : NODE_SIZE_LIMITS.minHeight;
+    const maximum = key === 'width' ? NODE_SIZE_LIMITS.maxWidth : NODE_SIZE_LIMITS.maxHeight;
+    return Math.min(maximum, Math.max(minimum, Math.round(Number(value) || fallback)));
+  }
+
+  function nodeWidth(node) {
+    return clampNodeDimension(node.data.width ?? NODE_SIZE_LIMITS.defaultWidth, 'width');
+  }
+
+  function nodeHeight(node) {
+    return clampNodeDimension(node.data.height ?? NODE_SIZE_LIMITS.defaultHeight, 'height');
+  }
+
+  function renderedNodeSize(node) {
+    const element = $(`.node[data-node-id="${CSS.escape(node.id)}"]`, refs.nodes);
+    return {
+      width: element?.offsetWidth || nodeWidth(node),
+      height: element?.offsetHeight || (node.data.height == null ? 180 : nodeHeight(node))
+    };
+  }
+
+  function pathLeaf(path) {
+    const value = String(path ?? '').trim();
+    if (!value) return '';
+    const withoutTrailingSeparators = value.replace(/[\\/]+$/, '') || value;
+    return withoutTrailingSeparators.split(/[\\/]/).filter(Boolean).at(-1) || withoutTrailingSeparators;
+  }
+
   function isLocalizedDefaultTitle(node) {
     if (!node.data.title || node.type === 'separator') return false;
     const keys = [nodeTitleKeys[node.type], nodeTypeKeys[node.type]].filter(Boolean);
@@ -604,18 +637,25 @@
   function nodeHtml(node) {
     const typeLabel = node.type === 'separator' ? functionLabel(node.data.function) : nodeTypeLabel(node.type);
     const validationErrors = state.validation.nodeErrors[node.id] || [];
+    const configuredPath = String(node.data.config?.path ?? '').trim();
+    const pathSummary = pathLeaf(configuredPath) || t('node.info.notSelected');
+    const pathTitle = configuredPath ? ` title="${escapeHtml(configuredPath)}"` : '';
+    const confirmationId = `${node.id}_delete_confirmation`;
+    const heightStyle = node.data.height == null ? '' : `min-height:${nodeHeight(node)}px;`;
     const info = node.type === 'separator'
       ? ''
       : node.type === 'input_folder' ? `<div class="node-info-row"><span>${escapeHtml(t('node.info.scan'))}</span><strong>${escapeHtml(t(node.data.config.recursive ? 'node.info.includeSubfolders' : 'node.info.currentFolder'))}</strong></div>`
       : node.type === 'slicer' ? `<div class="node-info-row"><span>${escapeHtml(t('node.info.format'))}</span><strong>${escapeHtml((node.data.config.output_format || 'wav').toUpperCase())}</strong></div>`
       : node.type === 'peak_normalize' ? `<div class="node-info-row"><span>${escapeHtml(t('node.info.targetPeak'))}</span><strong>${escapeHtml(String(node.data.config.target_peak_db ?? -3))} dB</strong></div>`
-      : node.type === 'output_folder' ? `<div class="node-info-row"><span>${escapeHtml(t('node.info.format'))}</span><strong>${escapeHtml((node.data.config.format || 'wav').toUpperCase())}</strong></div>`
-      : `<div class="node-info-row"><span>${escapeHtml(t('node.info.source'))}</span><strong>${escapeHtml(t(node.data.config.path ? 'node.info.selected' : 'node.info.notSelected'))}</strong></div>`;
+      : node.type === 'output_folder' ? `<div class="node-info-row"><span>${escapeHtml(t('node.info.format'))}</span><strong data-node-summary="format">${escapeHtml((node.data.config.format || 'wav').toUpperCase())}</strong></div><div class="node-info-row"><span>${escapeHtml(t('node.info.outputFolder'))}</span><strong data-node-summary="output-folder"${pathTitle}>${escapeHtml(pathSummary)}</strong></div>`
+      : `<div class="node-info-row"><span>${escapeHtml(t('node.info.source'))}</span><strong data-node-summary="source"${pathTitle}>${escapeHtml(pathSummary)}</strong></div>`;
     const inputs = getInputs(node).map(port => `<div class="port-row"><div class="port-label"><i class="port input" data-direction="input" data-port="${escapeHtml(port.id)}" style="--port-color:#55c9e5"></i><span>${escapeHtml(portLabel(node, port, 'input'))}</span></div></div>`).join('');
     const outputs = getOutputs(node).map((port, i) => `<div class="port-row"><div class="port-label output"><span>${escapeHtml(portLabel(node, port, 'output'))}</span><i class="port output" data-direction="output" data-port="${escapeHtml(port.id)}" style="--port-color:${i % 2 ? '#f3a45f' : '#9a6cf2'}"></i></div></div>`).join('');
-    return `<article class="node ${state.selectedNode === node.id ? 'selected' : ''} ${validationErrors.length ? 'validation-error' : ''}" data-node-id="${node.id}" title="${escapeHtml(validationErrors.length ? friendlyValidationError(validationErrors[0]) : '')}" style="left:${node.data.x}px;top:${node.data.y}px;--node-color:${palette[node.type] || palette.separator}">
-      <header class="node-header"><span class="node-header-icon">${icons[node.type] || '◇'}</span><span class="node-title"><b title="${escapeHtml(nodeTitle(node))}">${escapeHtml(nodeTitle(node))}</b><span>${escapeHtml(typeLabel)}</span></span>${validationErrors.length ? '<span class="node-error-mark">!</span>' : ''}<button class="node-menu" title="${escapeHtml(t('node.action.delete'))}">×</button></header>
+    return `<article class="node ${state.selectedNode === node.id ? 'selected' : ''} ${validationErrors.length ? 'validation-error' : ''}" data-node-id="${node.id}" title="${escapeHtml(validationErrors.length ? friendlyValidationError(validationErrors[0]) : '')}" style="left:${node.data.x}px;top:${node.data.y}px;width:${nodeWidth(node)}px;${heightStyle}--node-width:${nodeWidth(node)}px;--node-color:${palette[node.type] || palette.separator}">
+      <header class="node-header"><span class="node-header-icon">${icons[node.type] || '◇'}</span><span class="node-title"><b title="${escapeHtml(nodeTitle(node))}">${escapeHtml(nodeTitle(node))}</b><span>${escapeHtml(typeLabel)}</span></span>${validationErrors.length ? '<span class="node-error-mark">!</span>' : ''}<button type="button" class="node-menu" title="${escapeHtml(t('node.action.delete'))}" aria-label="${escapeHtml(t('node.action.delete'))}" aria-expanded="false" aria-controls="${escapeHtml(confirmationId)}">×</button></header>
+      <div class="node-delete-popover hidden" id="${escapeHtml(confirmationId)}" role="dialog" aria-label="${escapeHtml(t('node.delete.question'))}"><span>${escapeHtml(t('node.delete.question'))}</span><div><button type="button" class="node-delete-cancel">${escapeHtml(t('node.delete.cancel'))}</button><button type="button" class="node-delete-confirm">${escapeHtml(t('node.delete.confirm'))}</button></div></div>
       <div class="node-body">${info ? `<div class="node-info">${info}</div>` : ''}${inputs}${outputs}</div>
+      <button type="button" class="node-resize-handle" title="${escapeHtml(t('node.action.resize'))}" aria-label="${escapeHtml(t('node.action.resize'))}"></button>
     </article>`;
   }
 
@@ -631,10 +671,54 @@
     renderInspector();
   }
 
+  function closeNodeDeleteConfirmations(restoreFocus = false) {
+    let focusTarget = null;
+    let closed = false;
+    $$('.node-delete-popover:not(.hidden)', refs.nodes).forEach(popover => {
+      const node = popover.closest('.node');
+      const trigger = $('.node-menu', node);
+      focusTarget ||= trigger;
+      popover.classList.add('hidden');
+      node?.classList.remove('delete-confirming');
+      trigger?.setAttribute('aria-expanded', 'false');
+      closed = true;
+    });
+    if (restoreFocus) focusTarget?.focus();
+    return closed;
+  }
+
+  function positionNodeDeletePopover(popover) {
+    popover.style.transform = '';
+    const viewportRect = refs.viewport.getBoundingClientRect();
+    const popoverRect = popover.getBoundingClientRect();
+    const margin = 8;
+    const scale = state.transform.scale || 1;
+    let dx = 0;
+    let dy = 0;
+    if (popoverRect.right > viewportRect.right - margin) dx = (viewportRect.right - margin - popoverRect.right) / scale;
+    if (popoverRect.left + dx * scale < viewportRect.left + margin) dx += (viewportRect.left + margin - popoverRect.left - dx * scale) / scale;
+    if (popoverRect.bottom > viewportRect.bottom - margin) dy = (viewportRect.bottom - margin - popoverRect.bottom) / scale;
+    if (popoverRect.top + dy * scale < viewportRect.top + margin) dy += (viewportRect.top + margin - popoverRect.top - dy * scale) / scale;
+    if (dx || dy) popover.style.transform = `translate(${dx}px,${dy}px)`;
+  }
+
+  function toggleNodeDeleteConfirmation(element) {
+    const popover = $('.node-delete-popover', element);
+    const trigger = $('.node-menu', element);
+    const shouldOpen = popover?.classList.contains('hidden');
+    closeNodeDeleteConfirmations();
+    if (!shouldOpen || !popover) return;
+    popover.classList.remove('hidden');
+    element.classList.add('delete-confirming');
+    trigger?.setAttribute('aria-expanded', 'true');
+    positionNodeDeletePopover(popover);
+    $('.node-delete-confirm', popover)?.focus();
+  }
+
   function bindNode(element) {
     const id = element.dataset.nodeId;
     element.addEventListener('pointerdown', event => {
-      if (event.target.closest('.port,.node-remove,.node-menu')) return;
+      if (event.target.closest('.port,.node-remove,.node-menu,.node-delete-popover,.node-resize-handle')) return;
       selectNode(id); renderSelection(); renderInspector();
     });
     $('.node-header', element).addEventListener('pointerdown', event => startNodeDrag(event, id));
@@ -642,11 +726,17 @@
       port.addEventListener('pointerdown', event => startPortDrag(event, id, port.dataset.port, port.dataset.direction, port));
       port.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); });
     });
-    $$('.node-remove,.node-menu', element).forEach(button => button.addEventListener('click', event => { event.stopPropagation(); removeNode(id); }));
+    $('.node-menu', element).addEventListener('click', event => { event.stopPropagation(); toggleNodeDeleteConfirmation(element); });
+    $('.node-delete-cancel', element).addEventListener('click', event => { event.stopPropagation(); closeNodeDeleteConfirmations(true); });
+    $('.node-delete-confirm', element).addEventListener('click', event => { event.stopPropagation(); removeNode(id); });
+    const resizeHandle = $('.node-resize-handle', element);
+    resizeHandle.addEventListener('pointerdown', event => startNodeResize(event, id, element, resizeHandle));
+    resizeHandle.addEventListener('keydown', event => resizeNodeWithKeyboard(event, id, element));
   }
 
   function startNodeDrag(event, id) {
     if (event.button !== 0 || event.target.closest('button,input,select,textarea,a,.port')) return;
+    closeNodeDeleteConfirmations();
     cancelPointerInteractions(true);
     cancelConnection();
     event.stopPropagation();
@@ -657,6 +747,60 @@
     if (usesInspectorDrawer) setInspectorVisible(false);
     state.dragging = { id, pointerId:event.pointerId, captureEl:event.currentTarget, startX:event.clientX, startY:event.clientY, nodeX:node.data.x, nodeY:node.data.y, moved:false };
     event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function applyNodeDimensions(node, element) {
+    const width = nodeWidth(node);
+    element.style.width = `${width}px`;
+    element.style.setProperty('--node-width', `${width}px`);
+    if (node.data.height == null) element.style.removeProperty('min-height');
+    else element.style.minHeight = `${nodeHeight(node)}px`;
+  }
+
+  function startNodeResize(event, id, element, handle) {
+    if (event.button !== 0) return;
+    closeNodeDeleteConfirmations();
+    cancelPointerInteractions(true);
+    cancelConnection();
+    event.preventDefault();
+    event.stopPropagation();
+    const node = state.workflow.nodes.find(item => item.id === id);
+    if (!node) return;
+    const usesInspectorDrawer = window.matchMedia('(max-width:800px)').matches;
+    selectNode(id, { revealInspector:!usesInspectorDrawer }); renderSelection(); renderInspector();
+    if (usesInspectorDrawer) setInspectorVisible(false);
+    state.resizing = {
+      id, pointerId:event.pointerId, captureEl:handle,
+      startX:event.clientX, startY:event.clientY,
+      startWidth:element.offsetWidth, startHeight:element.offsetHeight,
+      originalWidth:node.data.width, originalHeight:node.data.height,
+      moved:false
+    };
+    element.classList.add('resizing');
+    refs.viewport.classList.add('node-resizing');
+    handle.setPointerCapture(event.pointerId);
+  }
+
+  function resizeNodeWithKeyboard(event, id, element) {
+    if (!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeNodeDeleteConfirmations();
+    const node = state.workflow.nodes.find(item => item.id === id);
+    if (!node) return;
+    const step = event.shiftKey ? 30 : 10;
+    let width = element.offsetWidth;
+    let height = element.offsetHeight;
+    if (event.key === 'ArrowLeft') width -= step;
+    if (event.key === 'ArrowRight') width += step;
+    if (event.key === 'ArrowUp') height -= step;
+    if (event.key === 'ArrowDown') height += step;
+    node.data.width = clampNodeDimension(width, 'width');
+    node.data.height = clampNodeDimension(height, 'height');
+    applyNodeDimensions(node, element);
+    node.data.height = clampNodeDimension(element.offsetHeight, 'height');
+    commit('调整节点大小');
+    renderEdges(); drawMinimap();
   }
 
   function startPortDrag(event, nodeId, portId, direction, element) {
@@ -1009,6 +1153,8 @@
   }
 
   function handleViewportResize() {
+    closeNodeDeleteConfirmations();
+    if (state.resizing) cancelPointerInteractions(true);
     const nextLibraryDrawerMode = window.matchMedia('(max-width:650px)').matches;
     const nextInspectorDrawerMode = window.matchMedia('(max-width:800px)').matches;
     if (nextLibraryDrawerMode !== libraryDrawerMode) {
@@ -1044,6 +1190,7 @@
   }
 
   function removeNode(id) {
+    closeNodeDeleteConfirmations();
     flushActiveInspectorField();
     resetGraphInteractions();
     state.workflow.nodes = state.workflow.nodes.filter(x => x.id !== id);
@@ -1089,7 +1236,7 @@
     const metadataSource = node.data.metadata_source || modelRecord?.source || t('model.metadata.unknown');
     const model = node.type === 'separator' ? `<div class="inspector-section"><h2>${escapeHtml(t('inspector.section.model'))}</h2><div class="model-summary"><span class="template-icon" style="--item-color:${palette.separator}">⌁</span><div><b title="${escapeHtml(nodeTitle(node))}">${escapeHtml(nodeTitle(node))}</b><span>${escapeHtml(node.data.architecture)} · ${escapeHtml(functionLabel(node.data.function))}</span></div></div><dl class="model-details"><div><dt>${escapeHtml(t('model.preview.filename'))}</dt><dd title="${escapeHtml(node.data.model_filename)}">${escapeHtml(node.data.model_filename)}</dd></div><div><dt>${escapeHtml(t('model.preview.metadata'))}</dt><dd>${escapeHtml(metadataSource)} · ${escapeHtml(t(`model.confidence.${confidenceKey}`))}</dd></div></dl><div class="tag-list">${getOutputs(node).map(x => `<span class="tag">${escapeHtml(x.label)}</span>`).join('')}</div></div>` : '';
     const validationBlock = nodeValidation.length ? `<div class="inspector-section validation-section"><h2>${escapeHtml(t('validation.needsFix'))}</h2>${nodeValidation.map(error => `<div class="validation-item">${escapeHtml(friendlyValidationError(error))}</div>`).join('')}</div>` : '';
-    refs.inspector.innerHTML = `${validationBlock}<div class="inspector-section"><h2>${escapeHtml(t('inspector.section.node'))}</h2>${field('__title',t('inspector.field.displayName'),nodeTitle(node),'','text')}<div class="field-inline">${field('__x',t('inspector.field.x'),node.data.x,'','number')}${field('__y',t('inspector.field.y'),node.data.y,'','number')}</div></div>${model}<div class="inspector-section"><h2>${escapeHtml(t('inspector.section.parameters'))}</h2>${fields || `<div class="field"><small>${escapeHtml(t('inspector.noEditableParameters'))}</small></div>`}</div><div class="inspector-section"><button class="danger-button" id="deleteNode">${escapeHtml(t('inspector.action.deleteNode'))}</button></div>`;
+    refs.inspector.innerHTML = `${validationBlock}<div class="inspector-section"><h2>${escapeHtml(t('inspector.section.node'))}</h2>${field('__title',t('inspector.field.displayName'),nodeTitle(node),'','text')}</div>${model}<div class="inspector-section"><h2>${escapeHtml(t('inspector.section.parameters'))}</h2>${fields || `<div class="field"><small>${escapeHtml(t('inspector.noEditableParameters'))}</small></div>`}</div><div class="inspector-section"><button class="danger-button" id="deleteNode">${escapeHtml(t('inspector.action.deleteNode'))}</button></div>`;
     $$('input[data-field],select[data-field]', refs.inspector).forEach(input => bindInspectorField(input, node));
     $$('.path-picker', refs.inspector).forEach(button => button.addEventListener('click', () => pickPath(button, node)));
     $('#deleteNode').addEventListener('click', () => removeNode(node.id));
@@ -1126,7 +1273,6 @@
       node.data.title = value.trim();
       node.data.title_customized = Boolean(node.data.title);
     }
-    else if (key === '__x' || key === '__y') node.data[key.slice(2)] = Number(value) || 0;
     else if (key === 'normalization_threshold') node.data.config[key] = Math.min(1, Math.max(0.01, Number(value) || 0.9));
     else if (key === 'threshold') node.data.config[key] = Math.min(0, Math.max(-120, Number.isFinite(numericValue) ? numericValue : -40));
     else if (['min_length','min_interval','hop_size','max_sil_kept'].includes(key)) node.data.config[key] = Math.max(1, Math.round(Number.isFinite(numericValue) ? numericValue : 1));
@@ -1134,7 +1280,7 @@
     else if (key === 'path') node.data.config[key] = String(value ?? '').trim();
     else node.data.config[key] = value === 'true' ? true : value === 'false' ? false : value;
     if (input) {
-      const displayed = key === '__title' ? nodeTitle(node) : key === '__x' || key === '__y' ? node.data[key.slice(2)] : node.data.config[key];
+      const displayed = key === '__title' ? nodeTitle(node) : node.data.config[key];
       input.value = String(displayed);
       input.dataset.initialValue = input.value;
       if (key === 'path') {
@@ -1151,13 +1297,22 @@
     if (!element) return;
     element.style.left = `${node.data.x}px`;
     element.style.top = `${node.data.y}px`;
+    applyNodeDimensions(node, element);
     $('.node-title b', element).textContent = nodeTitle(node);
     const summary = $('.node-info-row strong', element);
-    if (summary && node.type === 'input_file') summary.textContent = t(node.data.config.path ? 'node.info.selected' : 'node.info.notSelected');
     if (summary && node.type === 'input_folder') summary.textContent = t(node.data.config.recursive ? 'node.info.includeSubfolders' : 'node.info.currentFolder');
     if (summary && node.type === 'slicer') summary.textContent = String(node.data.config.output_format || 'wav').toUpperCase();
     if (summary && node.type === 'peak_normalize') summary.textContent = `${node.data.config.target_peak_db ?? -3} dB`;
     if (summary && node.type === 'output_folder') summary.textContent = String(node.data.config.format || 'wav').toUpperCase();
+    if (node.type === 'input_file' || node.type === 'output_folder') {
+      const path = String(node.data.config.path ?? '').trim();
+      const pathSummary = pathLeaf(path) || t('node.info.notSelected');
+      const target = $(`[data-node-summary="${node.type === 'input_file' ? 'source' : 'output-folder'}"]`, element);
+      if (target) {
+        target.textContent = pathSummary;
+        if (path) target.title = path; else target.removeAttribute('title');
+      }
+    }
     renderEdges(); drawMinimap();
   }
 
@@ -1217,8 +1372,9 @@
   }
   function fitView() {
     if (!state.workflow.nodes.length) { state.transform={x:0,y:0,scale:1}; applyTransform(); return; }
-    const minX=Math.min(...state.workflow.nodes.map(n=>n.data.x)), minY=Math.min(...state.workflow.nodes.map(n=>n.data.y));
-    const maxX=Math.max(...state.workflow.nodes.map(n=>n.data.x+224)), maxY=Math.max(...state.workflow.nodes.map(n=>n.data.y+180));
+    const bounds = state.workflow.nodes.map(node => ({ node, size:renderedNodeSize(node) }));
+    const minX=Math.min(...bounds.map(({node})=>node.data.x)), minY=Math.min(...bounds.map(({node})=>node.data.y));
+    const maxX=Math.max(...bounds.map(({node,size})=>node.data.x+size.width)), maxY=Math.max(...bounds.map(({node,size})=>node.data.y+size.height));
     const scale=Math.min(1.15, Math.max(.35, Math.min((refs.viewport.clientWidth-100)/(maxX-minX),(refs.viewport.clientHeight-100)/(maxY-minY))));
     state.transform={scale,x:(refs.viewport.clientWidth-(minX+maxX)*scale)/2,y:(refs.viewport.clientHeight-(minY+maxY)*scale)/2}; applyTransform();
   }
@@ -1227,11 +1383,12 @@
     const canvas=refs.minimap, ctx=canvas.getContext('2d'), w=canvas.width,h=canvas.height;
     ctx.clearRect(0,0,w,h); ctx.fillStyle='#11151d';ctx.fillRect(0,0,w,h);
     if (!state.workflow.nodes.length) return;
+    const sizes = new Map(state.workflow.nodes.map(node => [node.id, renderedNodeSize(node)]));
     const minX=Math.min(0,...state.workflow.nodes.map(n=>n.data.x-100)), minY=Math.min(0,...state.workflow.nodes.map(n=>n.data.y-100));
-    const maxX=Math.max(900,...state.workflow.nodes.map(n=>n.data.x+330)), maxY=Math.max(600,...state.workflow.nodes.map(n=>n.data.y+260));
+    const maxX=Math.max(900,...state.workflow.nodes.map(n=>n.data.x+sizes.get(n.id).width+100)), maxY=Math.max(600,...state.workflow.nodes.map(n=>n.data.y+sizes.get(n.id).height+80));
     const s=Math.min(w/(maxX-minX),h/(maxY-minY));
-    state.workflow.edges.forEach(edge=>{ const a=state.workflow.nodes.find(n=>n.id===edge.source),b=state.workflow.nodes.find(n=>n.id===edge.target);if(!a||!b)return;ctx.strokeStyle='#4c5362';ctx.beginPath();ctx.moveTo((a.data.x+224-minX)*s,(a.data.y+70-minY)*s);ctx.lineTo((b.data.x-minX)*s,(b.data.y+70-minY)*s);ctx.stroke(); });
-    state.workflow.nodes.forEach(node=>{ctx.fillStyle=palette[node.type]+'b8';ctx.fillRect((node.data.x-minX)*s,(node.data.y-minY)*s,Math.max(4,224*s),Math.max(3,75*s));});
+    state.workflow.edges.forEach(edge=>{ const a=state.workflow.nodes.find(n=>n.id===edge.source),b=state.workflow.nodes.find(n=>n.id===edge.target);if(!a||!b)return;const aSize=sizes.get(a.id),bSize=sizes.get(b.id);ctx.strokeStyle='#4c5362';ctx.beginPath();ctx.moveTo((a.data.x+aSize.width-minX)*s,(a.data.y+Math.min(70,aSize.height/2)-minY)*s);ctx.lineTo((b.data.x-minX)*s,(b.data.y+Math.min(70,bSize.height/2)-minY)*s);ctx.stroke(); });
+    state.workflow.nodes.forEach(node=>{const size=sizes.get(node.id);ctx.fillStyle=palette[node.type]+'b8';ctx.fillRect((node.data.x-minX)*s,(node.data.y-minY)*s,Math.max(4,size.width*s),Math.max(3,size.height*s));});
     const vx=(-state.transform.x/state.transform.scale-minX)*s,vy=(-state.transform.y/state.transform.scale-minY)*s;
     ctx.strokeStyle='#dde2eb';ctx.lineWidth=1;ctx.strokeRect(vx,vy,refs.viewport.clientWidth/state.transform.scale*s,refs.viewport.clientHeight/state.transform.scale*s);
   }
@@ -1395,6 +1552,8 @@
     if(!payload||!Array.isArray(payload.nodes)||!Array.isArray(payload.edges))throw new Error(t('workflow.message.invalid'));
     payload.nodes.forEach((node,i)=>{
       node.data=node.data||{};node.data.x=Number(node.data.x ?? node.position?.x ?? 80+i*260);node.data.y=Number(node.data.y ?? node.position?.y ?? 100);
+      if (node.data.width != null) node.data.width = clampNodeDimension(node.data.width, 'width');
+      if (node.data.height != null) node.data.height = clampNodeDimension(node.data.height, 'height');
       if (node.data.title_customized === undefined) node.data.title_customized = node.type === 'separator' || Boolean(node.data.title && !isLocalizedDefaultTitle(node));
       if (!node.data.title_customized && node.type !== 'separator') node.data.title = '';
       if (node.type === 'separator') node.data.outputs = normalizeOutputs(node.data);
@@ -1851,6 +2010,18 @@
 
   function cancelPointerInteractions(revertNode = true) {
     if (state.connectionDrag) finishConnectionDrag(null, true);
+    if (state.resizing) {
+      const resize = state.resizing;
+      state.resizing = null;
+      const node = state.workflow.nodes.find(item => item.id === resize.id);
+      if (node && revertNode && resize.moved) {
+        if (resize.originalWidth == null) delete node.data.width; else node.data.width = resize.originalWidth;
+        if (resize.originalHeight == null) delete node.data.height; else node.data.height = resize.originalHeight;
+        refreshNodePresentation(node);
+      }
+      releasePointerCapture(resize);
+      resize.captureEl?.closest('.node')?.classList.remove('resizing');
+    }
     if (state.dragging) {
       const drag = state.dragging;
       state.dragging = null;
@@ -1865,7 +2036,7 @@
       state.panning = null;
       releasePointerCapture(pan);
     }
-    refs.viewport.classList.remove('panning','node-dragging','connecting');
+    refs.viewport.classList.remove('panning','node-dragging','node-resizing','connecting');
   }
 
   function startCanvasPan(event) {
@@ -1882,6 +2053,22 @@
 
   function handlePointerMove(event) {
     if (state.connectionDrag?.pointerId === event.pointerId) { updateConnectionDrag(event); return; }
+    if (state.resizing?.pointerId === event.pointerId) {
+      event.preventDefault();
+      const resize = state.resizing;
+      const node = state.workflow.nodes.find(item => item.id === resize.id);
+      const element = resize.captureEl?.closest('.node');
+      if (!node || !element) { cancelPointerInteractions(); return; }
+      const dx = (event.clientX - resize.startX) / state.transform.scale;
+      const dy = (event.clientY - resize.startY) / state.transform.scale;
+      if (!resize.moved && Math.abs(dx) + Math.abs(dy) <= 2) return;
+      resize.moved = true;
+      node.data.width = clampNodeDimension(resize.startWidth + dx, 'width');
+      node.data.height = clampNodeDimension(resize.startHeight + dy, 'height');
+      applyNodeDimensions(node, element);
+      renderEdges(); drawMinimap();
+      return;
+    }
     if (state.panning?.pointerId === event.pointerId) {
       event.preventDefault();
       state.transform.x = state.panning.tx + event.clientX - state.panning.x;
@@ -1906,6 +2093,26 @@
 
   function finishPointerInteraction(event, cancelled = false) {
     if (state.connectionDrag?.pointerId === event.pointerId) { finishConnectionDrag(event, cancelled); refs.viewport.classList.remove('connecting'); return; }
+    if (state.resizing?.pointerId === event.pointerId) {
+      const resize = state.resizing;
+      state.resizing = null;
+      releasePointerCapture(resize);
+      const node = state.workflow.nodes.find(item => item.id === resize.id);
+      const element = resize.captureEl?.closest('.node');
+      if (cancelled && node) {
+        if (resize.originalWidth == null) delete node.data.width; else node.data.width = resize.originalWidth;
+        if (resize.originalHeight == null) delete node.data.height; else node.data.height = resize.originalHeight;
+        refreshNodePresentation(node);
+      } else if (resize.moved && node && element) {
+        node.data.width = clampNodeDimension(element.offsetWidth, 'width');
+        node.data.height = clampNodeDimension(element.offsetHeight, 'height');
+        commit('调整节点大小');
+        refreshNodePresentation(node);
+      }
+      element?.classList.remove('resizing');
+      refs.viewport.classList.remove('node-resizing');
+      return;
+    }
     if (state.dragging?.pointerId === event.pointerId) {
       const drag = state.dragging;
       state.dragging = null;
@@ -1926,11 +2133,12 @@
 
   function bindGlobalEvents() {
     refs.viewport.addEventListener('pointerdown', startCanvasPan);
+    document.addEventListener('pointerdown', event => { if (!event.target.closest('.node-menu,.node-delete-popover')) closeNodeDeleteConfirmations(); });
     document.addEventListener('pointermove', handlePointerMove, { passive:false });
     document.addEventListener('pointerup', event => finishPointerInteraction(event, false));
     document.addEventListener('pointercancel', event => finishPointerInteraction(event, true));
     document.addEventListener('lostpointercapture', event => {
-      const active = state.connectionDrag || state.dragging || state.panning;
+      const active = state.connectionDrag || state.resizing || state.dragging || state.panning;
       if (active?.pointerId === event.pointerId) finishPointerInteraction(event, true);
     });
     window.addEventListener('blur', () => { cancelPointerInteractions(true); cancelConnection(); });
@@ -1940,6 +2148,7 @@
     document.addEventListener('keydown',event=>{
       const manager = $('.manager-overlay:not(.hidden)');
       if (event.key === 'Escape' && manager) { event.preventDefault(); manager.classList.add('hidden'); return; }
+      if (event.key === 'Escape' && closeNodeDeleteConfirmations(true)) { event.preventDefault(); return; }
       if ((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s') { event.preventDefault(); saveWorkflow(); return; }
       if(event.key==='Escape'&&(state.connectionDrag||state.pendingPort)){event.preventDefault();cancelConnection();return;}
       if (manager || ['INPUT','SELECT','TEXTAREA'].includes(event.target.tagName)) return;
@@ -1976,7 +2185,7 @@
   }
 
   function renderLocalizedUI() {
-    if (state.connectionDrag || state.dragging || state.panning) cancelPointerInteractions(true);
+    if (state.connectionDrag || state.resizing || state.dragging || state.panning) cancelPointerInteractions(true);
     i18n.applyDocumentTranslations();
     renderLibrary();
     renderGraph();

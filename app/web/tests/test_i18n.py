@@ -71,6 +71,23 @@ class I18nTests(unittest.TestCase):
         self.assertIn("function scheduleModelPreview", source)
         self.assertIn('id="modelPreview"', index)
 
+    def test_node_cards_expose_resize_path_summaries_and_safe_delete(self) -> None:
+        source = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+        styles = (STATIC_DIR / "styles.css").read_text(encoding="utf-8")
+        self.assertIn("function startNodeResize", source)
+        self.assertIn("function resizeNodeWithKeyboard", source)
+        self.assertIn("node.data.width", source)
+        self.assertIn("node.data.height", source)
+        self.assertIn('data-node-summary="source"', source)
+        self.assertIn('data-node-summary="output-folder"', source)
+        self.assertIn("function pathLeaf", source)
+        self.assertIn("node-delete-popover", source)
+        self.assertIn("closeNodeDeleteConfirmations", source)
+        self.assertIn("positionNodeDeletePopover", source)
+        self.assertIn(".node-resize-handle", styles)
+        self.assertNotIn("inspector.field.x", source)
+        self.assertNotIn("inspector.field.y", source)
+
     def test_frontend_exposes_workflow_and_run_management(self) -> None:
         source = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
         index = (STATIC_DIR / "index.html").read_text(encoding="utf-8")

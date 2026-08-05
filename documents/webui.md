@@ -85,6 +85,10 @@ Legacy editor node names such as `file_input`, `folder_input`, `model`, and `out
 - Path values are trimmed. An explicitly empty path remains empty and does not fall back to stale loaded data.
 - Connect ports by dragging in either direction. Dragging from an occupied input reconnects it.
 - Clicking two compatible ports is retained as a fallback.
+- Drag the visible handle at a node's lower-right corner to resize its width and height. A focused handle accepts the arrow keys in 10 px steps and Shift+arrow in 30 px steps.
+- Single-file nodes show the selected filename in their Source summary. Output nodes show both their format and destination folder; the complete path remains available in Properties and as hover text.
+- The red node-header delete control opens a compact confirmation popover. Confirming deletes the node, while Cancel, Escape, or clicking elsewhere closes the popover without changing the graph.
+- Properties exposes the display name and workflow parameters, but not raw X/Y coordinates; node position remains controlled by canvas dragging.
 - Pointer state is cleared on pointer up, cancellation, lost capture, window blur, node deletion, workflow load, new workflow, undo, and redo.
 - Canvas panning disables browser text selection and uses pointer capture.
 - Validation errors are mapped back to node and edge IDs and highlighted on the graph.
@@ -218,6 +222,8 @@ Server-local state:
 - `user_data/web_runs/<run-id>/run.json`: persisted run status and event history
 - `user_data/web_runs/<run-id>/workflow.json`: immutable submitted workflow snapshot
 - `user_data/web_runs/<run-id>/<node-id>/`: intermediate separator output
+
+Optional node `data.width` and `data.height` values persist user-resized cards through drafts, JSON import/export, and server saves. Older workflows without these values keep the default 224 px width and content-driven height.
 
 Existing `user_data/web_workflows.json` data is migrated into the workflow directory once. The legacy file is retained, and `user_data/workflows/.legacy-migrated` prevents deleted workflows from being imported again.
 
