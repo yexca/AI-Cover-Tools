@@ -12,8 +12,9 @@ from fastapi.staticfiles import StaticFiles
 from .executor import RunManager
 from .dialogs import DialogBusyError, DialogError, DialogRequest, is_loopback_client, pick_path
 from .model_registry import ModelRegistry
-from .paths import STATIC_DIR
+from .paths import STATIC_DIR, UPLOADS_DIR
 from .schemas import RefreshRequest, RunRequest, Workflow
+from .uploads import AudioUploadError, AudioUploadStore
 from .workflows import WorkflowConflictError, WorkflowNotFoundError, WorkflowStore, validate_workflow_detailed
 
 
@@ -21,10 +22,14 @@ def create_app(
     registry: ModelRegistry | None = None,
     workflow_store: WorkflowStore | None = None,
     run_manager: RunManager | None = None,
+    upload_store: AudioUploadStore | None = None,
 ) -> FastAPI:
     model_registry = registry or ModelRegistry()
     workflows = workflow_store or WorkflowStore()
-    runs = run_manager or RunManager(model_registry)
+    uploads = upload_store or AudioUploadStore(getattr(run_manager, "uploads_dir", UPLOADS_DIR))
+    runs = run_manager or RunManager(model_registry, uploads_dir=uploads.directory)
+    if isinstance(runs, RunManager):
+        runs.uploads_dir = uploads.directory
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -39,6 +44,7 @@ def create_app(
     app.state.model_registry = model_registry
     app.state.workflow_store = workflows
     app.state.run_manager = runs
+    app.state.upload_store = uploads
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
@@ -66,6 +72,16 @@ def create_app(
             return await asyncio.to_thread(model_registry.refresh, payload.scope, payload.force)
         except Exception as exc:
             raise HTTPException(status_code=502 if payload.scope != "local" else 500, detail=str(exc)) from exc
+
+    @app.post("/api/uploads/audio", status_code=status.HTTP_201_CREATED)
+    async def upload_audio(request: Request, filename: str = Query(min_length=1)) -> Any:
+        try:
+            return await uploads.save(filename, request.stream())
+        except AudioUploadError as exc:
+            return JSONResponse(
+                status_code=400,
+                content={"error": {"code": exc.code, "message": str(exc)}},
+            )
 
     @app.post("/api/dialog/pick")
     async def pick_local_path(payload: DialogRequest, request: Request) -> Any:
@@ -137,7 +153,7 @@ def create_app(
 
     @app.post("/api/workflows/validate")
     def validate(workflow: Workflow) -> dict[str, Any]:
-        return validate_workflow_detailed(workflow, model_registry)
+        return validate_workflow_detailed(workflow, model_registry, uploads.directory)
 
     @app.get("/api/runs")
     def list_runs(limit: int = Query(default=100, ge=1, le=500)) -> dict[str, Any]:
@@ -152,7 +168,7 @@ def create_app(
             workflow = workflows.get(payload.workflow_id)
         if not workflow:
             raise HTTPException(status_code=400, detail="Provide workflow or workflow_id")
-        validation = validate_workflow_detailed(workflow, model_registry)
+        validation = validate_workflow_detailed(workflow, model_registry, uploads.directory)
         if not validation["valid"]:
             raise HTTPException(status_code=422, detail={"message": "Workflow validation failed", **validation})
         return runs.submit(workflow)

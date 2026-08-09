@@ -71,9 +71,10 @@ class I18nTests(unittest.TestCase):
         self.assertIn("function scheduleModelPreview", source)
         self.assertIn('id="modelPreview"', index)
 
-    def test_node_cards_expose_resize_path_summaries_and_safe_delete(self) -> None:
+    def test_node_cards_expose_resize_summaries_and_selected_node_toolbar(self) -> None:
         source = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
         styles = (STATIC_DIR / "styles.css").read_text(encoding="utf-8")
+        index = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
         self.assertIn("function startNodeResize", source)
         self.assertIn("function resizeNodeWithKeyboard", source)
         self.assertIn("node.data.width", source)
@@ -81,12 +82,38 @@ class I18nTests(unittest.TestCase):
         self.assertIn('data-node-summary="source"', source)
         self.assertIn('data-node-summary="output-folder"', source)
         self.assertIn("function pathLeaf", source)
-        self.assertIn("node-delete-popover", source)
-        self.assertIn("closeNodeDeleteConfirmations", source)
-        self.assertIn("positionNodeDeletePopover", source)
+        self.assertIn("element.addEventListener('pointerdown'", source)
+        self.assertIn("function renderNodeToolbar", source)
+        self.assertIn("function duplicateSelectedNode", source)
+        self.assertIn("const duplicate = deepClone(source)", source)
+        self.assertIn('id="nodeToolbar"', index)
+        self.assertIn('id="duplicateNodeAction"', index)
+        self.assertIn(".node-toolbar", styles)
+        self.assertIn("confirmation-align-left", source)
+        self.assertIn("confirmation-above", source)
+        self.assertIn(".node-toolbar.confirmation-align-left", styles)
+        self.assertIn(".node-toolbar.confirmation-above", styles)
+        self.assertNotIn("node-delete-popover", source)
+        self.assertNotIn("node-menu", source)
         self.assertIn(".node-resize-handle", styles)
         self.assertNotIn("inspector.field.x", source)
         self.assertNotIn("inspector.field.y", source)
+
+    def test_single_audio_uses_browser_upload(self) -> None:
+        source = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+        self.assertIn("if (node.type === 'input_file') fields = audioUploadField(c)", source)
+        self.assertIn('class="audio-upload-input" type="file"', source)
+        self.assertIn("/api/uploads/audio?filename=", source)
+        self.assertIn("node.data.config.upload_id = result.id", source)
+        self.assertIn("node.data.upload_id", source)
+
+    def test_smart_output_allows_multiple_frontend_connections(self) -> None:
+        source = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+        self.assertIn("function inputAllowsMultiple", source)
+        self.assertIn("node.data.config?.mode === 'smart_classification'", source)
+        self.assertIn("if (!inputAllowsMultiple(inputNode, input.portId))", source)
+        self.assertIn("inspector.option.smartClassification", source)
+        self.assertIn("node.data.mode = config.mode", source)
 
     def test_frontend_exposes_workflow_and_run_management(self) -> None:
         source = (STATIC_DIR / "app.js").read_text(encoding="utf-8")

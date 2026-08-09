@@ -43,7 +43,7 @@ Implemented WebUI node types:
 - Peak normalizer
 - Output folder
 
-The WebUI node library groups these nodes by workflow role. Separator models are nested under separation, cleanup, or other/unclassified task groups; architecture remains a filter, while missing output metadata is shown as a separate confirmation status.
+The WebUI node library groups these nodes by workflow role. Separator models are nested under separation, cleanup, or other/unclassified task groups; architecture remains a filter, while missing output metadata is shown as a separate confirmation status. Single audio uses browser upload, selected nodes expose a floating duplicate/delete toolbar, and Output folder supports standard naming or multi-input Smart classification.
 
 Main runnable entry points:
 

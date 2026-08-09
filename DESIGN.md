@@ -285,13 +285,14 @@ The graph canvas is the primary work surface. Sidebars support it and should col
 #### Nodes
 
 - Default node width: 224 px; header height: 40 px; radius: 9 px.
+- The complete non-interactive node surface is the drag target. Ports, buttons, links, form controls, and the resize handle retain their own pointer behavior.
 - A visible lower-right handle resizes node width and height. Resizing must follow canvas zoom, update connections and the minimap continuously, support keyboard arrow adjustments, and participate in workflow history and persistence.
 - Header color identifies type. Body content stays on the neutral panel surface.
 - Selection uses the node color plus a stronger border/shadow.
 - Running uses the node color as an active glow; validation errors use semantic red.
 - Titles and port labels elide visually but exact model filenames and stem handles remain in data.
-- File and folder summaries may show a compact basename for scanning, but preserve the complete path in the underlying data and an accessible detail surface.
-- The node-header delete action uses semantic red and requires an anchored confirmation popover; Cancel, Escape, and clicking outside dismiss it without deleting.
+- File and folder summaries may show a compact basename for scanning. Preserve complete folder paths in data; browser-uploaded audio preserves its original display name and opaque upload ID.
+- Selection exposes one compact floating node toolbar positioned inside the canvas viewport. Duplicate is neutral; Delete uses semantic red and requires an anchored confirmation. Cancel, Escape, and clicking outside dismiss the confirmation without deleting.
 - New nodes need a stable type, icon, title key, category, input/output contract, inspector editor, validation, execution support, and tests. A library-only card is not a completed node.
 
 #### Ports and Connections
@@ -299,6 +300,7 @@ The graph canvas is the primary work surface. Sidebars support it and should col
 - Ports remain visible outside the node edge with a minimum visual target and a larger effective pointer target where practical.
 - Hover, pending, compatible, and drop-target states must be distinct.
 - A connection can start from either an input or output port; compatibility rules are direction-independent.
+- Ordinary inputs accept one edge. Smart classification output is the deliberate exception and communicates that its audio input accepts multiple separator-derived edges.
 - Edge selection, active flow, and validation errors must remain visually distinguishable.
 - Raw port handles are backend contracts and are never localized or normalized. Only labels are presentation.
 
@@ -306,6 +308,7 @@ The graph canvas is the primary work surface. Sidebars support it and should col
 
 - Empty state explains how to select a node.
 - Group fields into coherent sections: model information, paths, parameters, ports, and validation as applicable.
+- Single audio uses the browser-native file input and reports upload state at the field. Server-local folder paths retain the native folder picker.
 - Common parameters appear before advanced model-specific options.
 - Changes update the active editor only, participate in undo/draft behavior, and visibly mark the workflow dirty.
 
@@ -318,10 +321,11 @@ The graph canvas is the primary work surface. Sidebars support it and should col
 - Dialogs use a dark scrim, one strong floating surface, clear title/subtitle hierarchy, and an explicit close action.
 - Toasts are transient feedback. Persistent or actionable failures also appear at the affected node, connection, validation banner, run record, or activity log.
 - Menus and previews stay inside the viewport and do not obscure the initiating control unnecessarily.
+- Floating node toolbars follow node movement, resizing, canvas pan/zoom, sidebar layout changes, and viewport resizing without changing graph geometry.
 
 ### Web Interaction Contract
 
-- Canvas panning begins only on the canvas background, never from nodes, ports, form controls, or links.
+- Canvas panning begins only on the canvas background, never from nodes, ports, floating toolbars, form controls, or links.
 - Node movement uses world coordinates adjusted for zoom and commits history only after a real move.
 - Pointer capture is released on normal completion and cancellation. `pointercancel`, lost capture, window blur, workflow replacement, and node deletion must leave no stuck interaction state.
 - Escape closes the topmost manager or cancels a pending connection before invoking broader shortcuts.

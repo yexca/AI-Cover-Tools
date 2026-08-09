@@ -10,12 +10,78 @@ import wave
 from pathlib import Path
 from unittest.mock import patch
 
-from app.web.executor import RunManager
+from app.web.executor import AudioArtifact, RunManager, RunState
 from app.web.model_registry import ModelRegistry
 from app.web.schemas import Workflow
 
 
 class ExecutorTests(unittest.TestCase):
+    def test_unconnected_separator_branch_is_not_executed(self) -> None:
+        class PruningRunManager(RunManager):
+            def _separate(self, *args, **kwargs):
+                raise AssertionError("unconnected separator should not execute")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "song.wav"
+            source.write_bytes(b"audio")
+            output = root / "output"
+            manager = PruningRunManager(ModelRegistry(root / "models", root / "registry.json"), root / "runs")
+            workflow = Workflow.model_validate(
+                {
+                    "nodes": [
+                        {"id": "input", "type": "input_file", "data": {"path": str(source)}},
+                        {"id": "unused", "type": "separator", "data": {"model_filename": "unused.ckpt"}},
+                        {"id": "output", "type": "output_folder", "data": {"path": str(output)}},
+                    ],
+                    "edges": [
+                        {"source": "input", "target": "unused"},
+                        {"source": "input", "target": "output"},
+                    ],
+                }
+            )
+            try:
+                run_id = manager.submit(workflow)["id"]
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    state = manager.get(run_id)
+                    if state and state["status"] in {"completed", "failed", "cancelled"}:
+                        break
+                    time.sleep(0.02)
+            finally:
+                manager.shutdown()
+
+            self.assertEqual(state["status"], "completed", state.get("error"))
+            self.assertTrue((output / "song_audio.wav").is_file())
+
+    def test_smart_classification_uses_model_stem_and_relative_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source.wav"
+            source.write_bytes(b"audio")
+            manager = RunManager(ModelRegistry(root / "models", root / "registry.json"), root / "runs")
+            try:
+                written = manager._write_outputs(
+                    RunState(id="run", workflow_id="workflow", workflow_name="Workflow"),
+                    "output",
+                    {"path": str(root / "output"), "mode": "smart_classification", "format": "same"},
+                    [
+                        AudioArtifact(
+                            path=source,
+                            basename="song",
+                            relative_dir=Path("album") / "disc-1",
+                            stem="Lead Vocals",
+                            model="Model Name",
+                            node="split",
+                        )
+                    ],
+                )
+            finally:
+                manager.shutdown()
+
+            expected = root / "output" / "Model_Name_Lead_Vocals" / "album" / "disc-1" / "song.wav"
+            self.assertEqual(written, [expected])
+            self.assertEqual(expected.read_bytes(), b"audio")
     def test_file_to_output_workflow_runs_without_separator(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -19,11 +19,14 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 from uuid import uuid4
 
+from app.utils.naming import safe_name
+
 from .formats import AUDIO_EXTENSIONS
 from .model_registry import ModelRegistry
-from .paths import MODELS_DIR, RUNS_DIR, SEPARATOR_SOURCE_DIR
+from .paths import MODELS_DIR, RUNS_DIR, SEPARATOR_SOURCE_DIR, UPLOADS_DIR
 from .schemas import Workflow
-from .workflows import topological_order
+from .uploads import AudioUploadStore
+from .workflows import output_reachable_order
 
 
 def _now() -> str:
@@ -96,9 +99,15 @@ class RunManager:
     _MAX_EVENTS_PER_RUN = 2000
     _MAX_GLOBAL_EVENTS = 5000
 
-    def __init__(self, registry: ModelRegistry, runs_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        registry: ModelRegistry,
+        runs_dir: Path | None = None,
+        uploads_dir: Path | None = None,
+    ) -> None:
         self.registry = registry
         self.runs_dir = runs_dir or RUNS_DIR
+        self.uploads_dir = uploads_dir or UPLOADS_DIR
         self._runs: dict[str, RunState] = {}
         self._lock = threading.RLock()
         self._events: list[dict[str, Any]] = []
@@ -326,7 +335,7 @@ class RunManager:
             incoming[edge.target].append(edge)
         products: dict[tuple[str, str], list[AudioArtifact]] = {}
         final_outputs: list[Path] = []
-        order = topological_order(workflow)
+        order = output_reachable_order(workflow)
         total = max(len(order), 1)
         run_dir = self._run_dir(run.id)
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -366,13 +375,20 @@ class RunManager:
         return final_outputs
 
     def _read_input(self, node_type: str, data: dict[str, Any]) -> list[AudioArtifact]:
-        path = Path(str(data["path"])).expanduser().resolve()
         if node_type == "input_file":
+            upload_id = str(data.get("upload_id") or "").strip()
+            path = (
+                AudioUploadStore(self.uploads_dir).resolve(upload_id)
+                if upload_id
+                else Path(str(data["path"])).expanduser().resolve()
+            )
             if not path.is_file():
                 raise FileNotFoundError(f"Input audio file does not exist: {path}")
             if path.suffix.lower() not in AUDIO_EXTENSIONS:
                 raise ValueError(f"Unsupported input audio extension: {path.suffix}")
-            return [AudioArtifact(path=path, basename=path.stem)]
+            display_name = Path(str(data.get("upload_name") or path.name)).name
+            return [AudioArtifact(path=path, basename=Path(display_name).stem or path.stem)]
+        path = Path(str(data["path"])).expanduser().resolve()
         if not path.is_dir():
             raise FileNotFoundError(f"Input folder does not exist: {path}")
         recursive = bool(data.get("recursive", True))
@@ -578,6 +594,7 @@ class RunManager:
         output_root = Path(str(data["path"])).expanduser().resolve()
         output_root.mkdir(parents=True, exist_ok=True)
         template = str(data.get("naming_template") or "{relative_dir}/{basename}_{stem}.{ext}")
+        mode = str(data.get("mode") or "standard")
         conflict = str(data.get("conflict") or "rename")
         requested_format = str(data.get("format") or "same").lower().lstrip(".")
         written: list[Path] = []
@@ -586,15 +603,26 @@ class RunManager:
             relative_dir = "" if artifact.relative_dir == Path() else artifact.relative_dir.as_posix()
             source_extension = artifact.path.suffix.lower().lstrip(".")
             destination_extension = source_extension if requested_format in {"", "same", "source"} else requested_format
-            relative_name = template.format(
-                relative_dir=relative_dir,
-                basename=artifact.basename,
-                stem=artifact.stem,
-                ext=destination_extension,
-                model=artifact.model,
-                node=artifact.node or node_id,
-            ).replace("//", "/").lstrip("/\\")
-            relative_path = Path(relative_name)
+            if mode == "smart_classification":
+                if not artifact.model or not artifact.stem or artifact.stem in {"audio", "unknown"}:
+                    raise ValueError(
+                        f"Smart classification requires model and stem metadata: {artifact.path.name}"
+                    )
+                relative_path = Path(f"{safe_name(artifact.model)}_{safe_name(artifact.stem)}")
+                if artifact.relative_dir != Path():
+                    relative_path /= artifact.relative_dir
+                relative_path /= f"{artifact.basename}.{destination_extension}"
+                relative_name = relative_path.as_posix()
+            else:
+                relative_name = template.format(
+                    relative_dir=relative_dir,
+                    basename=artifact.basename,
+                    stem=artifact.stem,
+                    ext=destination_extension,
+                    model=artifact.model,
+                    node=artifact.node or node_id,
+                ).replace("//", "/").lstrip("/\\")
+                relative_path = Path(relative_name)
             if relative_path.is_absolute() or ".." in relative_path.parts:
                 raise ValueError(f"Output naming template escapes the selected folder: {relative_name}")
             destination = output_root / relative_path

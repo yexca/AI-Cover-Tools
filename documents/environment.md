@@ -32,7 +32,7 @@ Behavior:
 
 The installer tries conda-forge first and pip as fallback.
 
-The WebUI Windows path picker reuses PySide6 in a short-lived subprocess. This keeps Qt on the subprocess main thread and does not add another GUI dependency.
+The WebUI Windows folder picker reuses PySide6 in a short-lived subprocess. This keeps Qt on the subprocess main thread and does not add another GUI dependency. Single audio selection uses the browser's native file input and FastAPI streaming, so it adds no Python multipart dependency.
 
 ### WebUI
 

@@ -41,13 +41,13 @@ To start the node-based WebUI:
 run-webui.bat
 ```
 
-Then open `http://127.0.0.1:8188` in a browser. The launcher always uses the project-local `env` and prints a clear error if the environment has not been installed. Uvicorn options can be passed through, for example `run-webui.bat --port 8000`.
+Then open `http://127.0.0.1:7657` in a browser. The launcher always uses the project-local `env` and prints a clear error if the environment has not been installed. Uvicorn options can be passed through, for example `run-webui.bat --port 8000`.
 
 ## WebUI MVP
 
-The WebUI is an early ComfyUI-style audio workflow editor. Its initial node set includes single-file input, folder input, model-based audio processing, and folder output. Processing models are grouped by function in the left sidebar, with architecture available as a filter; model output ports are derived from the model registry metadata.
+The WebUI is a ComfyUI-style audio workflow editor with single-audio and folder inputs, model-based separation, audio slicing, peak normalization, and folder outputs. Processing models are grouped by function in the left sidebar, with architecture available as a filter; model output ports are derived from the model registry metadata. Output folders support standard naming and Smart classification, which accepts multiple separator-derived inputs and writes `<model>_<stem>/<relative source folder>/<song>.<ext>`.
 
-Drag a library item onto the canvas, or double-click it to add a node. Select a node to edit it in the Properties panel, and drag its lower-right handle to resize it. Single-file and output nodes summarize the selected filename or destination folder directly on the canvas. The red header delete control asks for confirmation in a compact popover before removing a node. Path fields provide a **Browse** button that opens the native Windows file or folder picker on the machine running the WebUI. Create connections by dragging from either an output port to an input port or in the reverse direction; clicking two compatible ports remains available as a fallback. Before a run starts, the server checks required paths, model availability, ports, and graph structure, then highlights the affected nodes and connections.
+Drag a library item onto the canvas, or double-click it to add a node. Drag any non-interactive part of a node to move it; selecting a node shows a compact toolbar above it for duplication and confirmed deletion, while the lower-right handle resizes it. The Single audio control uses the browser's file chooser and uploads the selection to the local service; input and output folder fields keep the native Windows folder picker. Create connections by dragging in either direction, or by clicking two compatible ports. Before a run starts, the server validates paths, uploads, models, ports, and graph structure. Branches that cannot reach an Output folder are not executed, and same-name output files follow the selected rename, overwrite, or skip policy.
 
 The interface follows the browser language by default and currently supports Simplified Chinese, Japanese, and English. The language selector in the top bar can override the browser setting and remembers the choice locally.
 

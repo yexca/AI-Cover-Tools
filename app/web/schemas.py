@@ -42,6 +42,9 @@ class WorkflowNode(BaseModel):
         if self.type in {"input_file", "input_folder"}:
             self.data.setdefault("path", config.get("path"))
             self.data.setdefault("recursive", config.get("recursive", True))
+            if self.type == "input_file":
+                self.data.setdefault("upload_id", config.get("upload_id"))
+                self.data.setdefault("upload_name", config.get("upload_name"))
             include = config.get("include")
             if include and "extensions" not in self.data:
                 self.data["extensions"] = [part.strip().replace("*", "") for part in str(include).split(";") if part.strip()]
@@ -50,6 +53,7 @@ class WorkflowNode(BaseModel):
             self.data.setdefault("naming_template", config.get("naming") or config.get("naming_template"))
             self.data.setdefault("conflict", config.get("conflict", "rename"))
             self.data.setdefault("format", config.get("format", "same"))
+            self.data.setdefault("mode", config.get("mode", "standard"))
         elif self.type == "separator":
             options = self.data.setdefault("options", {})
             if config.get("output_format"):

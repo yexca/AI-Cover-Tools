@@ -13,6 +13,7 @@ from .formats import AUDIO_EXTENSIONS
 from .model_registry import ModelRegistry
 from .paths import LEGACY_WORKFLOWS_PATH, WORKFLOWS_DIR
 from .schemas import Workflow, utc_now
+from .uploads import AudioUploadError, AudioUploadStore
 
 
 class WorkflowValidationError(ValueError):
@@ -175,7 +176,11 @@ class WorkflowStore:
             return True
 
 
-def validate_workflow_detailed(workflow: Workflow, registry: ModelRegistry) -> dict[str, Any]:
+def validate_workflow_detailed(
+    workflow: Workflow,
+    registry: ModelRegistry,
+    uploads_dir: Path | None = None,
+) -> dict[str, Any]:
     errors: list[str] = []
     global_errors: list[str] = []
     node_errors: dict[str, list[str]] = defaultdict(list)
@@ -200,6 +205,7 @@ def validate_workflow_detailed(workflow: Workflow, registry: ModelRegistry) -> d
         add_global("Workflow has no nodes")
     incoming: dict[str, list[str]] = defaultdict(list)
     outgoing: dict[str, list[str]] = defaultdict(list)
+    incoming_edges: dict[tuple[str, str], list[str]] = defaultdict(list)
     edge_ids = {edge.id for edge in workflow.edges}
     if len(edge_ids) != len(workflow.edges):
         add_global("Edge IDs must be unique")
@@ -225,18 +231,62 @@ def validate_workflow_detailed(workflow: Workflow, registry: ModelRegistry) -> d
             add_edge(edge.id, f"Input node {edge.target} cannot have incoming edges")
         source_handle = edge.source_handle or "audio"
         target_handle = edge.target_handle or "audio"
+        incoming_edges[(edge.target, target_handle)].append(edge.id)
         if source_type in {"input_file", "input_folder", "slicer", "peak_normalize"} and source_handle != "audio":
             add_edge(edge.id, f"Node {edge.source} has no output port: {source_handle}")
         if target_type in {"separator", "slicer", "peak_normalize", "output_folder"} and target_handle != "audio":
             add_edge(edge.id, f"Node {edge.target} has no input port: {target_handle}")
 
+    for (node_id, handle), connected_edges in incoming_edges.items():
+        node = node_by_id.get(node_id)
+        allows_multiple = bool(
+            node
+            and node.type == "output_folder"
+            and str(node.data.get("mode") or "standard") == "smart_classification"
+        )
+        if len(connected_edges) > 1 and not allows_multiple:
+            add_node(node_id, f"Node {node_id} input port {handle} accepts only one connection")
+
+    uploads = AudioUploadStore(uploads_dir) if uploads_dir is not None else AudioUploadStore()
+    separator_lineage: dict[str, bool] = {}
+
+    def is_separator_derived(node_id: str, visiting: set[str] | None = None) -> bool:
+        if node_id in separator_lineage:
+            return separator_lineage[node_id]
+        node = node_by_id.get(node_id)
+        if node is None:
+            return False
+        if node.type == "separator":
+            separator_lineage[node_id] = True
+            return True
+        if node.type not in {"slicer", "peak_normalize"}:
+            separator_lineage[node_id] = False
+            return False
+        active = set(visiting or ())
+        if node_id in active:
+            return False
+        active.add(node_id)
+        parents = incoming[node_id]
+        result = bool(parents) and all(is_separator_derived(parent, active) for parent in parents)
+        separator_lineage[node_id] = result
+        return result
+
     for node in workflow.nodes:
         data = node.data
         if node.type == "input_file":
-            if not data.get("path"):
+            upload_id = str(data.get("upload_id") or "").strip()
+            if upload_id:
+                try:
+                    path = uploads.resolve(upload_id)
+                except AudioUploadError as exc:
+                    add_node(node.id, str(exc))
+                    path = None
+            elif not data.get("path"):
                 add_node(node.id, f"Input file node {node.id} is missing path")
+                path = None
             else:
                 path = Path(str(data["path"])).expanduser()
+            if path is not None:
                 if not path.exists():
                     add_node(node.id, f"Input audio file does not exist: {path}")
                 elif not path.is_file():
@@ -304,6 +354,9 @@ def validate_workflow_detailed(workflow: Workflow, registry: ModelRegistry) -> d
                 if not -60.0 <= target_peak_db <= 0.0:
                     add_node(node.id, f"Peak normalize node {node.id} target peak must be between -60 and 0 dB")
         elif node.type == "output_folder":
+            mode = str(data.get("mode") or "standard")
+            if mode not in {"standard", "smart_classification"}:
+                add_node(node.id, f"Output node {node.id} uses an unsupported mode: {mode}")
             if not data.get("path"):
                 add_node(node.id, f"Output node {node.id} is missing path")
             else:
@@ -312,6 +365,10 @@ def validate_workflow_detailed(workflow: Workflow, registry: ModelRegistry) -> d
                     add_node(node.id, f"Output path is not a directory: {path}")
             if not incoming[node.id]:
                 add_node(node.id, f"Output node {node.id} has no audio input")
+            elif mode == "smart_classification" and not all(
+                is_separator_derived(source) for source in incoming[node.id]
+            ):
+                add_node(node.id, f"Smart classification output node {node.id} requires separator-derived audio")
 
     if not any(node.type in {"input_file", "input_folder"} for node in workflow.nodes):
         add_global("Workflow needs at least one input node")
@@ -345,10 +402,14 @@ def validate_workflow_detailed(workflow: Workflow, registry: ModelRegistry) -> d
     }
 
 
-def validate_workflow(workflow: Workflow, registry: ModelRegistry) -> list[str]:
+def validate_workflow(
+    workflow: Workflow,
+    registry: ModelRegistry,
+    uploads_dir: Path | None = None,
+) -> list[str]:
     """Compatibility helper for callers that only need flat messages."""
 
-    return validate_workflow_detailed(workflow, registry)["errors"]
+    return validate_workflow_detailed(workflow, registry, uploads_dir)["errors"]
 
 
 def topological_order(workflow: Workflow) -> list[str]:
@@ -367,3 +428,18 @@ def topological_order(workflow: Workflow) -> list[str]:
             if indegree[target] == 0:
                 queue.append(target)
     return ordered
+
+
+def output_reachable_order(workflow: Workflow) -> list[str]:
+    incoming: dict[str, list[str]] = defaultdict(list)
+    for edge in workflow.edges:
+        incoming[edge.target].append(edge.source)
+    required = {node.id for node in workflow.nodes if node.type == "output_folder"}
+    pending = list(required)
+    while pending:
+        target = pending.pop()
+        for source in incoming[target]:
+            if source not in required:
+                required.add(source)
+                pending.append(source)
+    return [node_id for node_id in topological_order(workflow) if node_id in required]

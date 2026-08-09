@@ -11,7 +11,13 @@ from app.web.executor import RunManager
 from app.web.main import create_app
 from app.web.model_registry import ModelRegistry
 from app.web.schemas import RunRequest, Workflow
-from app.web.workflows import WorkflowStore, topological_order, validate_workflow, validate_workflow_detailed
+from app.web.workflows import (
+    WorkflowStore,
+    output_reachable_order,
+    topological_order,
+    validate_workflow,
+    validate_workflow_detailed,
+)
 
 
 class _Registry:
@@ -142,6 +148,60 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn(stem_edge_id, details["edge_errors"])
             self.assertEqual(details["node_errors"], {})
             self.assertEqual(details["errors"], errors)
+
+    def test_execution_order_excludes_branches_that_cannot_reach_an_output(self) -> None:
+        workflow = Workflow.model_validate(
+            {
+                "nodes": [
+                    {"id": "input", "type": "input_file"},
+                    {"id": "used", "type": "peak_normalize"},
+                    {"id": "unused", "type": "separator"},
+                    {"id": "output", "type": "output_folder"},
+                ],
+                "edges": [
+                    {"source": "input", "target": "used"},
+                    {"source": "used", "target": "output"},
+                    {"source": "input", "target": "unused"},
+                ],
+            }
+        )
+        self.assertEqual(topological_order(workflow), ["input", "used", "unused", "output"])
+        self.assertEqual(output_reachable_order(workflow), ["input", "used", "output"])
+
+    def test_smart_classification_accepts_multiple_separator_outputs_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "song.wav"
+            source.write_bytes(b"audio")
+            payload = {
+                "nodes": [
+                    {"id": "input", "type": "input_file", "data": {"path": str(source)}},
+                    {"id": "split", "type": "separator", "data": {"model_filename": "test.ckpt"}},
+                    {
+                        "id": "output",
+                        "type": "output_folder",
+                        "data": {"path": str(root / "outputs"), "mode": "smart_classification"},
+                    },
+                ],
+                "edges": [
+                    {"source": "input", "target": "split"},
+                    {"source": "split", "source_handle": "vocals", "target": "output"},
+                    {"source": "split", "source_handle": "other", "target": "output"},
+                ],
+            }
+            workflow = Workflow.model_validate(payload)
+            self.assertEqual(validate_workflow(workflow, _Registry()), [])
+
+            workflow.nodes[-1].data["mode"] = "standard"
+            self.assertTrue(any("accepts only one connection" in error for error in validate_workflow(workflow, _Registry())))
+
+            direct = Workflow.model_validate(
+                {
+                    "nodes": [payload["nodes"][0], payload["nodes"][2]],
+                    "edges": [{"source": "input", "target": "output"}],
+                }
+            )
+            self.assertTrue(any("requires separator-derived audio" in error for error in validate_workflow(direct, _Registry())))
 
     def test_slicer_and_peak_normalize_nodes_validate_as_audio_transforms(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

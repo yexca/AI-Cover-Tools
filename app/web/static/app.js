@@ -42,7 +42,8 @@
     workflowName: $('#workflowName'), canvasTitle: $('#canvasTitle'), zoomLabel: $('#zoomReset'),
     workflowList: $('#workflowList'), workflowTabs: $('#workflowTabs'), runList: $('#runList'), activeRunCount: $('#activeRunCount'),
     appShell: $('.app-shell'), libraryPanel: $('#libraryPanel'), inspectorPanel: $('#propertiesPanel'),
-    libraryResizer: $('#libraryResizer'), inspectorResizer: $('#inspectorResizer')
+    libraryResizer: $('#libraryResizer'), inspectorResizer: $('#inspectorResizer'),
+    nodeToolbar: $('#nodeToolbar'), nodeDeleteConfirmation: $('#nodeDeleteConfirmation')
   };
 
   const palette = {
@@ -537,11 +538,11 @@
   function makeNode(type, x, y, model = null) {
     const base = { id: uid('node'), type, data: { x: Math.round(x), y: Math.round(y), title: '', title_customized: false, config: {} } };
     if (type === 'input_file') {
-      base.data.outputs = [{ id:'audio', label:'audio' }]; base.data.config = { path: '' };
+      base.data.outputs = [{ id:'audio', label:'audio' }]; base.data.config = { path:'', upload_id:'', upload_name:'' };
     } else if (type === 'input_folder') {
       base.data.outputs = [{ id:'audio', label:'audio' }]; base.data.config = { path:'', recursive:true, include:'*.wav;*.flac;*.mp3;*.m4a' };
     } else if (type === 'output_folder') {
-      base.data.inputs = [{ id:'audio', label:'audio' }]; base.data.config = { path:'outputs', naming:'{basename}_{stem}.{ext}', format:'wav', conflict:'rename' };
+      base.data.inputs = [{ id:'audio', label:'audio' }]; base.data.config = { path:'outputs', naming:'{basename}_{stem}.{ext}', format:'wav', conflict:'rename', mode:'standard' };
     } else if (type === 'separator') {
       base.data.title = model?.name || 'Audio Separator';
       base.data.title_customized = true;
@@ -582,6 +583,12 @@
 
   function getInputs(node) { return node.data.inputs || []; }
   function getOutputs(node) { return node.data.outputs || []; }
+
+  function inputAllowsMultiple(node, portId) {
+    return node?.type === 'output_folder'
+      && String(portId) === 'audio'
+      && node.data.config?.mode === 'smart_classification';
+  }
 
   function defaultNodeTitle(node) {
     if (node.type === 'separator') return node.data.title || 'Audio Separator';
@@ -629,6 +636,7 @@
   }
 
   function portLabel(node, port, direction) {
+    if (port.id === 'audio' && direction === 'input' && inputAllowsMultiple(node, port.id)) return t('port.audioMultiple');
     if (port.id === 'audio') return t(node.type === 'input_folder' && direction === 'output' ? 'port.audioBatch' : 'port.audio');
     if (node.type !== 'separator' && port.id === 'output') return t('port.output');
     return port.label || port.id;
@@ -637,23 +645,25 @@
   function nodeHtml(node) {
     const typeLabel = node.type === 'separator' ? functionLabel(node.data.function) : nodeTypeLabel(node.type);
     const validationErrors = state.validation.nodeErrors[node.id] || [];
-    const configuredPath = String(node.data.config?.path ?? '').trim();
+    const configuredPath = String(
+      node.type === 'input_file'
+        ? node.data.config?.upload_name || node.data.config?.path || ''
+        : node.data.config?.path || ''
+    ).trim();
     const pathSummary = pathLeaf(configuredPath) || t('node.info.notSelected');
     const pathTitle = configuredPath ? ` title="${escapeHtml(configuredPath)}"` : '';
-    const confirmationId = `${node.id}_delete_confirmation`;
     const heightStyle = node.data.height == null ? '' : `min-height:${nodeHeight(node)}px;`;
     const info = node.type === 'separator'
       ? ''
       : node.type === 'input_folder' ? `<div class="node-info-row"><span>${escapeHtml(t('node.info.scan'))}</span><strong>${escapeHtml(t(node.data.config.recursive ? 'node.info.includeSubfolders' : 'node.info.currentFolder'))}</strong></div>`
       : node.type === 'slicer' ? `<div class="node-info-row"><span>${escapeHtml(t('node.info.format'))}</span><strong>${escapeHtml((node.data.config.output_format || 'wav').toUpperCase())}</strong></div>`
       : node.type === 'peak_normalize' ? `<div class="node-info-row"><span>${escapeHtml(t('node.info.targetPeak'))}</span><strong>${escapeHtml(String(node.data.config.target_peak_db ?? -3))} dB</strong></div>`
-      : node.type === 'output_folder' ? `<div class="node-info-row"><span>${escapeHtml(t('node.info.format'))}</span><strong data-node-summary="format">${escapeHtml((node.data.config.format || 'wav').toUpperCase())}</strong></div><div class="node-info-row"><span>${escapeHtml(t('node.info.outputFolder'))}</span><strong data-node-summary="output-folder"${pathTitle}>${escapeHtml(pathSummary)}</strong></div>`
+      : node.type === 'output_folder' ? `<div class="node-info-row"><span>${escapeHtml(t('node.info.mode'))}</span><strong data-node-summary="output-mode">${escapeHtml(t(node.data.config.mode === 'smart_classification' ? 'inspector.option.smartClassification' : 'inspector.option.standardOutput'))}</strong></div><div class="node-info-row"><span>${escapeHtml(t('node.info.format'))}</span><strong data-node-summary="format">${escapeHtml((node.data.config.format || 'wav').toUpperCase())}</strong></div><div class="node-info-row"><span>${escapeHtml(t('node.info.outputFolder'))}</span><strong data-node-summary="output-folder"${pathTitle}>${escapeHtml(pathSummary)}</strong></div>`
       : `<div class="node-info-row"><span>${escapeHtml(t('node.info.source'))}</span><strong data-node-summary="source"${pathTitle}>${escapeHtml(pathSummary)}</strong></div>`;
     const inputs = getInputs(node).map(port => `<div class="port-row"><div class="port-label"><i class="port input" data-direction="input" data-port="${escapeHtml(port.id)}" style="--port-color:#55c9e5"></i><span>${escapeHtml(portLabel(node, port, 'input'))}</span></div></div>`).join('');
     const outputs = getOutputs(node).map((port, i) => `<div class="port-row"><div class="port-label output"><span>${escapeHtml(portLabel(node, port, 'output'))}</span><i class="port output" data-direction="output" data-port="${escapeHtml(port.id)}" style="--port-color:${i % 2 ? '#f3a45f' : '#9a6cf2'}"></i></div></div>`).join('');
     return `<article class="node ${state.selectedNode === node.id ? 'selected' : ''} ${validationErrors.length ? 'validation-error' : ''}" data-node-id="${node.id}" title="${escapeHtml(validationErrors.length ? friendlyValidationError(validationErrors[0]) : '')}" style="left:${node.data.x}px;top:${node.data.y}px;width:${nodeWidth(node)}px;${heightStyle}--node-width:${nodeWidth(node)}px;--node-color:${palette[node.type] || palette.separator}">
-      <header class="node-header"><span class="node-header-icon">${icons[node.type] || '◇'}</span><span class="node-title"><b title="${escapeHtml(nodeTitle(node))}">${escapeHtml(nodeTitle(node))}</b><span>${escapeHtml(typeLabel)}</span></span>${validationErrors.length ? '<span class="node-error-mark">!</span>' : ''}<button type="button" class="node-menu" title="${escapeHtml(t('node.action.delete'))}" aria-label="${escapeHtml(t('node.action.delete'))}" aria-expanded="false" aria-controls="${escapeHtml(confirmationId)}">×</button></header>
-      <div class="node-delete-popover hidden" id="${escapeHtml(confirmationId)}" role="dialog" aria-label="${escapeHtml(t('node.delete.question'))}"><span>${escapeHtml(t('node.delete.question'))}</span><div><button type="button" class="node-delete-cancel">${escapeHtml(t('node.delete.cancel'))}</button><button type="button" class="node-delete-confirm">${escapeHtml(t('node.delete.confirm'))}</button></div></div>
+      <header class="node-header"><span class="node-header-icon">${icons[node.type] || '◇'}</span><span class="node-title"><b title="${escapeHtml(nodeTitle(node))}">${escapeHtml(nodeTitle(node))}</b><span>${escapeHtml(typeLabel)}</span></span>${validationErrors.length ? '<span class="node-error-mark">!</span>' : ''}</header>
       <div class="node-body">${info ? `<div class="node-info">${info}</div>` : ''}${inputs}${outputs}</div>
       <button type="button" class="node-resize-handle" title="${escapeHtml(t('node.action.resize'))}" aria-label="${escapeHtml(t('node.action.resize'))}"></button>
     </article>`;
@@ -662,6 +672,7 @@
   function renderGraph() {
     refs.nodes.innerHTML = state.workflow.nodes.map(nodeHtml).join('');
     $$('.node', refs.nodes).forEach(element => bindNode(element));
+    renderNodeToolbar();
     requestAnimationFrame(() => { renderEdges(); drawMinimap(); });
     refs.empty.classList.toggle('hidden', state.workflow.nodes.length > 0);
     $('#nodeCount').textContent = plural('canvas.nodeCount', state.workflow.nodes.length);
@@ -671,64 +682,76 @@
     renderInspector();
   }
 
-  function closeNodeDeleteConfirmations(restoreFocus = false) {
-    let focusTarget = null;
-    let closed = false;
-    $$('.node-delete-popover:not(.hidden)', refs.nodes).forEach(popover => {
-      const node = popover.closest('.node');
-      const trigger = $('.node-menu', node);
-      focusTarget ||= trigger;
-      popover.classList.add('hidden');
-      node?.classList.remove('delete-confirming');
-      trigger?.setAttribute('aria-expanded', 'false');
-      closed = true;
-    });
-    if (restoreFocus) focusTarget?.focus();
-    return closed;
+  function closeNodeDeleteConfirmation(restoreFocus = false) {
+    const wasOpen = !refs.nodeDeleteConfirmation.classList.contains('hidden');
+    refs.nodeDeleteConfirmation.classList.add('hidden');
+    $('#deleteNodeAction').setAttribute('aria-expanded', 'false');
+    if (restoreFocus && wasOpen) $('#deleteNodeAction').focus();
+    return wasOpen;
   }
 
-  function positionNodeDeletePopover(popover) {
-    popover.style.transform = '';
+  function positionNodeToolbar() {
+    if (refs.nodeToolbar.classList.contains('hidden')) return;
+    const element = $(`.node[data-node-id="${CSS.escape(state.selectedNode || '')}"]`, refs.nodes);
+    if (!element) return;
     const viewportRect = refs.viewport.getBoundingClientRect();
-    const popoverRect = popover.getBoundingClientRect();
+    const nodeRect = element.getBoundingClientRect();
+    const toolbarWidth = refs.nodeToolbar.offsetWidth;
+    const toolbarHeight = refs.nodeToolbar.offsetHeight;
     const margin = 8;
-    const scale = state.transform.scale || 1;
-    let dx = 0;
-    let dy = 0;
-    if (popoverRect.right > viewportRect.right - margin) dx = (viewportRect.right - margin - popoverRect.right) / scale;
-    if (popoverRect.left + dx * scale < viewportRect.left + margin) dx += (viewportRect.left + margin - popoverRect.left - dx * scale) / scale;
-    if (popoverRect.bottom > viewportRect.bottom - margin) dy = (viewportRect.bottom - margin - popoverRect.bottom) / scale;
-    if (popoverRect.top + dy * scale < viewportRect.top + margin) dy += (viewportRect.top + margin - popoverRect.top - dy * scale) / scale;
-    if (dx || dy) popover.style.transform = `translate(${dx}px,${dy}px)`;
+    const maximumLeft = Math.max(margin, viewportRect.width - toolbarWidth - margin);
+    const left = Math.min(maximumLeft, Math.max(margin, nodeRect.left - viewportRect.left + (nodeRect.width - toolbarWidth) / 2));
+    const above = nodeRect.top - viewportRect.top - toolbarHeight - margin;
+    const below = nodeRect.bottom - viewportRect.top + margin;
+    const top = above >= margin ? above : Math.min(viewportRect.height - toolbarHeight - margin, below);
+    refs.nodeToolbar.style.left = `${Math.round(left)}px`;
+    refs.nodeToolbar.style.top = `${Math.round(Math.max(margin, top))}px`;
+    refs.nodeToolbar.classList.toggle(
+      'confirmation-align-left',
+      left + 184 <= viewportRect.width - margin
+    );
+    const confirmationHeight = refs.nodeDeleteConfirmation.classList.contains('hidden')
+      ? 78
+      : refs.nodeDeleteConfirmation.offsetHeight;
+    const toolbarIsAboveNode = top + toolbarHeight <= nodeRect.top - viewportRect.top;
+    refs.nodeToolbar.classList.toggle(
+      'confirmation-above',
+      toolbarIsAboveNode && top - confirmationHeight - margin >= margin
+    );
   }
 
-  function toggleNodeDeleteConfirmation(element) {
-    const popover = $('.node-delete-popover', element);
-    const trigger = $('.node-menu', element);
-    const shouldOpen = popover?.classList.contains('hidden');
-    closeNodeDeleteConfirmations();
-    if (!shouldOpen || !popover) return;
-    popover.classList.remove('hidden');
-    element.classList.add('delete-confirming');
-    trigger?.setAttribute('aria-expanded', 'true');
-    positionNodeDeletePopover(popover);
-    $('.node-delete-confirm', popover)?.focus();
+  function renderNodeToolbar() {
+    const node = state.workflow.nodes.find(item => item.id === state.selectedNode);
+    if (!node) {
+      closeNodeDeleteConfirmation();
+      refs.nodeToolbar.dataset.nodeId = '';
+      refs.nodeToolbar.classList.add('hidden');
+      return;
+    }
+    if (refs.nodeToolbar.dataset.nodeId !== node.id) closeNodeDeleteConfirmation();
+    refs.nodeToolbar.dataset.nodeId = node.id;
+    refs.nodeToolbar.classList.remove('hidden');
+    requestAnimationFrame(positionNodeToolbar);
+  }
+
+  function openNodeDeleteConfirmation() {
+    if (!state.selectedNode) return;
+    refs.nodeDeleteConfirmation.classList.remove('hidden');
+    $('#deleteNodeAction').setAttribute('aria-expanded', 'true');
+    positionNodeToolbar();
+    $('#confirmNodeDelete').focus();
   }
 
   function bindNode(element) {
     const id = element.dataset.nodeId;
     element.addEventListener('pointerdown', event => {
-      if (event.target.closest('.port,.node-remove,.node-menu,.node-delete-popover,.node-resize-handle')) return;
-      selectNode(id); renderSelection(); renderInspector();
+      if (event.target.closest('.port,button,input,select,textarea,a,.node-resize-handle')) return;
+      startNodeDrag(event, id);
     });
-    $('.node-header', element).addEventListener('pointerdown', event => startNodeDrag(event, id));
     $$('.port', element).forEach(port => {
       port.addEventListener('pointerdown', event => startPortDrag(event, id, port.dataset.port, port.dataset.direction, port));
       port.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); });
     });
-    $('.node-menu', element).addEventListener('click', event => { event.stopPropagation(); toggleNodeDeleteConfirmation(element); });
-    $('.node-delete-cancel', element).addEventListener('click', event => { event.stopPropagation(); closeNodeDeleteConfirmations(true); });
-    $('.node-delete-confirm', element).addEventListener('click', event => { event.stopPropagation(); removeNode(id); });
     const resizeHandle = $('.node-resize-handle', element);
     resizeHandle.addEventListener('pointerdown', event => startNodeResize(event, id, element, resizeHandle));
     resizeHandle.addEventListener('keydown', event => resizeNodeWithKeyboard(event, id, element));
@@ -736,7 +759,7 @@
 
   function startNodeDrag(event, id) {
     if (event.button !== 0 || event.target.closest('button,input,select,textarea,a,.port')) return;
-    closeNodeDeleteConfirmations();
+    closeNodeDeleteConfirmation();
     cancelPointerInteractions(true);
     cancelConnection();
     event.stopPropagation();
@@ -759,7 +782,7 @@
 
   function startNodeResize(event, id, element, handle) {
     if (event.button !== 0) return;
-    closeNodeDeleteConfirmations();
+    closeNodeDeleteConfirmation();
     cancelPointerInteractions(true);
     cancelConnection();
     event.preventDefault();
@@ -785,7 +808,7 @@
     if (!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)) return;
     event.preventDefault();
     event.stopPropagation();
-    closeNodeDeleteConfirmations();
+    closeNodeDeleteConfirmation();
     const node = state.workflow.nodes.find(item => item.id === id);
     if (!node) return;
     const step = event.shiftKey ? 30 : 10;
@@ -800,7 +823,7 @@
     applyNodeDimensions(node, element);
     node.data.height = clampNodeDimension(element.offsetHeight, 'height');
     commit('调整节点大小');
-    renderEdges(); drawMinimap();
+    renderEdges(); drawMinimap(); positionNodeToolbar();
   }
 
   function startPortDrag(event, nodeId, portId, direction, element) {
@@ -812,7 +835,8 @@
     selectNode(nodeId, { revealInspector:!usesInspectorDrawer }); renderSelection(); renderInspector();
     if (usesInspectorDrawer) setInspectorVisible(false);
     const point = clientToWorld(event.clientX, event.clientY);
-    const incoming = direction === 'input'
+    const portNode = state.workflow.nodes.find(node => node.id === nodeId);
+    const incoming = direction === 'input' && !inputAllowsMultiple(portNode, portId)
       ? state.workflow.edges.find(edge => edge.target === nodeId && edge.target_handle === portId)
       : null;
     state.connectionDrag = {
@@ -887,7 +911,10 @@
     const input = first.direction === 'input' ? first : second;
     const duplicate = state.workflow.edges.some(edge => edge.source === output.nodeId && edge.source_handle === output.portId && edge.target === input.nodeId && edge.target_handle === input.portId);
     if (duplicate) { toast(t('connection.duplicate')); return false; }
-    state.workflow.edges = state.workflow.edges.filter(edge => !(edge.target === input.nodeId && edge.target_handle === input.portId));
+    const inputNode = state.workflow.nodes.find(node => node.id === input.nodeId);
+    if (!inputAllowsMultiple(inputNode, input.portId)) {
+      state.workflow.edges = state.workflow.edges.filter(edge => !(edge.target === input.nodeId && edge.target_handle === input.portId));
+    }
     state.workflow.edges.push({ id:uid('edge'), source:output.nodeId, source_handle:output.portId, target:input.nodeId, target_handle:input.portId });
     commit('创建连接');
     state.selectedEdge = state.workflow.edges.length - 1;
@@ -1047,7 +1074,7 @@
   }
 
   function scheduleSidebarRedraw() {
-    requestAnimationFrame(() => { renderEdges(); drawMinimap(); });
+    requestAnimationFrame(() => { renderEdges(); drawMinimap(); positionNodeToolbar(); });
   }
 
   function setLibraryVisible(visible) {
@@ -1101,6 +1128,7 @@
     const applied = applySidebarWidths();
     state[widthKey] = applied[side];
     if (persist) persistSidebarLayout();
+    requestAnimationFrame(positionNodeToolbar);
   }
 
   function bindSidebarResizer(resizer, side) {
@@ -1153,7 +1181,7 @@
   }
 
   function handleViewportResize() {
-    closeNodeDeleteConfirmations();
+    closeNodeDeleteConfirmation();
     if (state.resizing) cancelPointerInteractions(true);
     const nextLibraryDrawerMode = window.matchMedia('(max-width:650px)').matches;
     const nextInspectorDrawerMode = window.matchMedia('(max-width:800px)').matches;
@@ -1167,6 +1195,7 @@
     }
     applySidebarWidths();
     drawMinimap();
+    positionNodeToolbar();
   }
 
   function selectNode(id, { revealInspector = true } = {}) {
@@ -1176,6 +1205,7 @@
   }
   function renderSelection() {
     $$('.node', refs.nodes).forEach(element => element.classList.toggle('selected', element.dataset.nodeId === state.selectedNode));
+    renderNodeToolbar();
   }
 
   function flushActiveInspectorField() {
@@ -1190,7 +1220,7 @@
   }
 
   function removeNode(id) {
-    closeNodeDeleteConfirmations();
+    closeNodeDeleteConfirmation();
     flushActiveInspectorField();
     resetGraphInteractions();
     state.workflow.nodes = state.workflow.nodes.filter(x => x.id !== id);
@@ -1199,8 +1229,24 @@
     commit('删除节点'); renderGraph();
   }
 
+  function duplicateSelectedNode() {
+    const source = state.workflow.nodes.find(node => node.id === state.selectedNode);
+    if (!source) return;
+    closeNodeDeleteConfirmation();
+    flushActiveInspectorField();
+    resetGraphInteractions();
+    const duplicate = deepClone(source);
+    duplicate.id = uid('node');
+    duplicate.data.x = Math.round(Number(source.data.x || 0) + 32);
+    duplicate.data.y = Math.round(Number(source.data.y || 0) + 32);
+    state.workflow.nodes.push(duplicate);
+    selectNode(duplicate.id);
+    commit('复制节点');
+    renderGraph();
+  }
+
   function removeSelected() {
-    if (state.selectedNode) removeNode(state.selectedNode);
+    if (state.selectedNode) openNodeDeleteConfirmation();
     else if (state.selectedEdge !== null) {
       flushActiveInspectorField();
       resetGraphInteractions();
@@ -1224,9 +1270,15 @@
     const c = node.data.config || (node.data.config = {});
     const nodeValidation = state.validation.nodeErrors[node.id] || [];
     let fields = '';
-    if (node.type === 'input_file') fields = pathField('path',t('inspector.field.audioFilePath'),c.path,t('inspector.field.audioFilePath.example'),'audio_file');
+    if (node.type === 'input_file') fields = audioUploadField(c);
     if (node.type === 'input_folder') fields = pathField('path',t('inspector.field.inputFolder'),c.path,t('inspector.field.inputFolder.example'),'input_directory') + field('include',t('inspector.field.fileFilter'),c.include,t('inspector.field.fileFilter.help'),'text') + selectField('recursive',t('inspector.field.recursive'),String(c.recursive),[['true',t('inspector.option.yes')],['false',t('inspector.option.no')]]);
-    if (node.type === 'output_folder') fields = pathField('path',t('inspector.field.outputFolder'),c.path,t('inspector.field.outputFolder.example'),'output_directory') + field('naming',t('inspector.field.namingTemplate'),c.naming,t('inspector.field.namingTemplate.help'),'text') + `<div class="field-inline">${selectField('format',t('inspector.field.outputFormat'),c.format,[['wav','WAV'],['flac','FLAC'],['mp3','MP3']])}${selectField('conflict',t('inspector.field.conflict'),c.conflict,[['rename',t('inspector.option.rename')],['overwrite',t('inspector.option.overwrite')],['skip',t('inspector.option.skip')]])}</div>`;
+    if (node.type === 'output_folder') {
+      const mode = c.mode || 'standard';
+      fields = pathField('path',t('inspector.field.outputFolder'),c.path,t('inspector.field.outputFolder.example'),'output_directory')
+        + selectField('mode',t('inspector.field.outputMode'),mode,[['standard',t('inspector.option.standardOutput')],['smart_classification',t('inspector.option.smartClassification')]])
+        + (mode === 'standard' ? field('naming',t('inspector.field.namingTemplate'),c.naming,t('inspector.field.namingTemplate.help'),'text') : `<div class="field-note">${escapeHtml(t('inspector.field.smartClassification.help'))}</div>`)
+        + `<div class="field-inline">${selectField('format',t('inspector.field.outputFormat'),c.format,[['wav','WAV'],['flac','FLAC'],['mp3','MP3']])}${selectField('conflict',t('inspector.field.conflict'),c.conflict,[['rename',t('inspector.option.rename')],['overwrite',t('inspector.option.overwrite')],['skip',t('inspector.option.skip')]])}</div>`;
+    }
     if (node.type === 'separator') fields = selectField('output_format',t('inspector.field.intermediateFormat'),c.output_format,[['wav','WAV'],['flac','FLAC']]) + field('normalization_threshold',t('inspector.field.peakLimit'),c.normalization_threshold ?? 0.9,t('inspector.field.peakLimit.help'),'number');
     if (node.type === 'slicer') fields = selectField('output_format',t('inspector.field.intermediateFormat'),c.output_format,[['wav','WAV'],['flac','FLAC'],['mp3','MP3']]) + field('threshold',t('inspector.field.silenceThreshold'),c.threshold ?? -40,t('inspector.field.silenceThreshold.help'),'number') + field('min_length',t('inspector.field.minLength'),c.min_length ?? 5000,t('inspector.field.milliseconds'),'number') + field('min_interval',t('inspector.field.minInterval'),c.min_interval ?? 300,t('inspector.field.milliseconds'),'number') + field('hop_size',t('inspector.field.hopSize'),c.hop_size ?? 10,t('inspector.field.milliseconds'),'number') + field('max_sil_kept',t('inspector.field.maxSilenceKept'),c.max_sil_kept ?? 1000,t('inspector.field.milliseconds'),'number');
     if (node.type === 'peak_normalize') fields = field('target_peak_db',t('inspector.field.targetPeak'),c.target_peak_db ?? -3,t('inspector.field.targetPeak.help'),'number');
@@ -1236,10 +1288,12 @@
     const metadataSource = node.data.metadata_source || modelRecord?.source || t('model.metadata.unknown');
     const model = node.type === 'separator' ? `<div class="inspector-section"><h2>${escapeHtml(t('inspector.section.model'))}</h2><div class="model-summary"><span class="template-icon" style="--item-color:${palette.separator}">⌁</span><div><b title="${escapeHtml(nodeTitle(node))}">${escapeHtml(nodeTitle(node))}</b><span>${escapeHtml(node.data.architecture)} · ${escapeHtml(functionLabel(node.data.function))}</span></div></div><dl class="model-details"><div><dt>${escapeHtml(t('model.preview.filename'))}</dt><dd title="${escapeHtml(node.data.model_filename)}">${escapeHtml(node.data.model_filename)}</dd></div><div><dt>${escapeHtml(t('model.preview.metadata'))}</dt><dd>${escapeHtml(metadataSource)} · ${escapeHtml(t(`model.confidence.${confidenceKey}`))}</dd></div></dl><div class="tag-list">${getOutputs(node).map(x => `<span class="tag">${escapeHtml(x.label)}</span>`).join('')}</div></div>` : '';
     const validationBlock = nodeValidation.length ? `<div class="inspector-section validation-section"><h2>${escapeHtml(t('validation.needsFix'))}</h2>${nodeValidation.map(error => `<div class="validation-item">${escapeHtml(friendlyValidationError(error))}</div>`).join('')}</div>` : '';
-    refs.inspector.innerHTML = `${validationBlock}<div class="inspector-section"><h2>${escapeHtml(t('inspector.section.node'))}</h2>${field('__title',t('inspector.field.displayName'),nodeTitle(node),'','text')}</div>${model}<div class="inspector-section"><h2>${escapeHtml(t('inspector.section.parameters'))}</h2>${fields || `<div class="field"><small>${escapeHtml(t('inspector.noEditableParameters'))}</small></div>`}</div><div class="inspector-section"><button class="danger-button" id="deleteNode">${escapeHtml(t('inspector.action.deleteNode'))}</button></div>`;
+    refs.inspector.innerHTML = `${validationBlock}<div class="inspector-section"><h2>${escapeHtml(t('inspector.section.node'))}</h2>${field('__title',t('inspector.field.displayName'),nodeTitle(node),'','text')}</div>${model}<div class="inspector-section"><h2>${escapeHtml(t('inspector.section.parameters'))}</h2>${fields || `<div class="field"><small>${escapeHtml(t('inspector.noEditableParameters'))}</small></div>`}</div>`;
     $$('input[data-field],select[data-field]', refs.inspector).forEach(input => bindInspectorField(input, node));
     $$('.path-picker', refs.inspector).forEach(button => button.addEventListener('click', () => pickPath(button, node)));
-    $('#deleteNode').addEventListener('click', () => removeNode(node.id));
+    const audioInput = $('.audio-upload-input', refs.inspector);
+    $('.audio-upload-button', refs.inspector)?.addEventListener('click', () => audioInput?.click());
+    audioInput?.addEventListener('change', () => uploadAudioFile(audioInput, node));
   }
 
   function field(key, label, value, help = '', type = 'text') {
@@ -1248,6 +1302,11 @@
   function pathField(key, label, value, help, kind) {
     const status = t(value ? 'path.status.set' : 'path.status.empty');
     return `<label class="field path-field"><span>${label}</span><span class="path-field-row"><input data-field="${key}" type="text" value="${escapeHtml(value)}"><button type="button" class="path-picker" data-kind="${kind}" data-field="${key}">${escapeHtml(t('path.browse'))}</button></span><small class="field-status ${value ? 'valid' : ''}">${escapeHtml(status)}</small>${help ? `<small>${help}</small>` : ''}</label>`;
+  }
+  function audioUploadField(config) {
+    const selected = String(config.upload_name || pathLeaf(config.path || '') || '').trim();
+    const title = String(config.upload_name || config.path || '').trim();
+    return `<div class="field audio-upload-field"><span>${escapeHtml(t('inspector.field.audioFilePath'))}</span><div class="audio-upload-row"><button type="button" class="audio-upload-button">${escapeHtml(t('upload.choose'))}</button><strong${title ? ` title="${escapeHtml(title)}"` : ''}>${escapeHtml(selected || t('node.info.notSelected'))}</strong></div><input class="audio-upload-input" type="file" accept=".wav,.flac,.mp3,.ogg,.opus,.m4a,.aiff,.aif,.ac3" hidden><small class="field-status ${selected ? 'valid' : ''}">${escapeHtml(t(selected ? 'upload.status.ready' : 'upload.status.empty'))}</small><small>${escapeHtml(t('inspector.field.audioFilePath.example'))}</small></div>`;
   }
   function selectField(key, label, value, options) {
     return `<label class="field"><span>${label}</span><select data-field="${key}">${options.map(([v,l]) => `<option value="${v}" ${String(value) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`;
@@ -1289,7 +1348,7 @@
       }
     }
     commit('修改节点参数');
-    refreshNodePresentation(node);
+    if (key === 'mode') renderGraph(); else refreshNodePresentation(node);
   }
 
   function refreshNodePresentation(node) {
@@ -1303,9 +1362,16 @@
     if (summary && node.type === 'input_folder') summary.textContent = t(node.data.config.recursive ? 'node.info.includeSubfolders' : 'node.info.currentFolder');
     if (summary && node.type === 'slicer') summary.textContent = String(node.data.config.output_format || 'wav').toUpperCase();
     if (summary && node.type === 'peak_normalize') summary.textContent = `${node.data.config.target_peak_db ?? -3} dB`;
-    if (summary && node.type === 'output_folder') summary.textContent = String(node.data.config.format || 'wav').toUpperCase();
+    if (node.type === 'output_folder') {
+      const format = $('[data-node-summary="format"]', element);
+      if (format) format.textContent = String(node.data.config.format || 'wav').toUpperCase();
+    }
     if (node.type === 'input_file' || node.type === 'output_folder') {
-      const path = String(node.data.config.path ?? '').trim();
+      const path = String(
+        node.type === 'input_file'
+          ? node.data.config.upload_name || node.data.config.path || ''
+          : node.data.config.path || ''
+      ).trim();
       const pathSummary = pathLeaf(path) || t('node.info.notSelected');
       const target = $(`[data-node-summary="${node.type === 'input_file' ? 'source' : 'output-folder'}"]`, element);
       if (target) {
@@ -1313,7 +1379,11 @@
         if (path) target.title = path; else target.removeAttribute('title');
       }
     }
-    renderEdges(); drawMinimap();
+    if (node.type === 'output_folder') {
+      const mode = $('[data-node-summary="output-mode"]', element);
+      if (mode) mode.textContent = t(node.data.config.mode === 'smart_classification' ? 'inspector.option.smartClassification' : 'inspector.option.standardOutput');
+    }
+    renderEdges(); drawMinimap(); positionNodeToolbar();
   }
 
   function setPathStatus(field, message, type = '') {
@@ -1321,6 +1391,51 @@
     if (!status) return;
     status.textContent = message;
     status.className = `field-status ${type}`;
+  }
+
+  async function uploadAudioFile(input, node) {
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    const workflowAtRequest = state.workflow;
+    const nodeAtRequest = node;
+    const requestIsCurrent = () => state.workflow === workflowAtRequest && state.workflow.nodes.includes(nodeAtRequest);
+    const field = input.closest('.audio-upload-field');
+    const button = $('.audio-upload-button', field);
+    button.disabled = true;
+    button.classList.add('loading');
+    setPathStatus(field, t('upload.status.uploading', { name:file.name }));
+    try {
+      const result = await api(`/api/uploads/audio?filename=${encodeURIComponent(file.name)}`, {
+        method:'POST',
+        headers:{'Content-Type':file.type || 'application/octet-stream'},
+        body:file
+      });
+      if (!requestIsCurrent()) return;
+      node.data.config.upload_id = result.id;
+      node.data.config.upload_name = result.name;
+      node.data.config.path = '';
+      commit('选择上传音频');
+      refreshNodePresentation(node);
+      toast(t(result.reused ? 'upload.reused' : 'upload.completed', { name:result.name }), 'success');
+      renderInspector();
+    } catch (error) {
+      if (!requestIsCurrent()) return;
+      const message = error.code === 'unsupported_audio_file'
+        ? t('path.unsupportedAudio')
+        : error.code === 'empty_audio_file'
+          ? t('upload.empty')
+          : error.code === 'invalid_audio_filename'
+            ? t('upload.invalidName')
+            : error.message;
+      setPathStatus(field, t('upload.failed', { error:message }), 'error');
+      toast(t('upload.failed', { error:message }), 'error');
+    } finally {
+      if (requestIsCurrent() && button.isConnected) {
+        button.disabled = false;
+        button.classList.remove('loading');
+      }
+    }
   }
 
   async function pickPath(button, node) {
@@ -1363,6 +1478,7 @@
     refs.viewport.querySelector('.canvas-grid').style.backgroundSize = `${20 * scale}px ${20 * scale}px`;
     refs.zoomLabel.textContent = `${Math.round(scale * 100)}%`;
     drawMinimap();
+    positionNodeToolbar();
   }
   function screenToWorld(x,y) { return { x:(x - state.transform.x) / state.transform.scale, y:(y - state.transform.y) / state.transform.scale }; }
   function setZoom(scale, anchorX = refs.viewport.clientWidth/2, anchorY = refs.viewport.clientHeight/2) {
@@ -1399,7 +1515,11 @@
       const node = deepClone(original), config = node.data.config || {};
       const hasConfiguredPath = Object.prototype.hasOwnProperty.call(config, 'path');
       const path = String(hasConfiguredPath ? config.path ?? '' : node.data.path ?? '').trim();
-      if (node.type === 'input_file') node.data.path = path;
+      if (node.type === 'input_file') {
+        node.data.upload_id = String(config.upload_id || node.data.upload_id || '').trim();
+        node.data.upload_name = String(config.upload_name || node.data.upload_name || '').trim();
+        node.data.path = node.data.upload_id ? '' : path;
+      }
       if (node.type === 'input_folder') {
         node.data.path = path;
         node.data.recursive = config.recursive ?? node.data.recursive ?? true;
@@ -1424,6 +1544,7 @@
         node.data.naming_template = config.naming || node.data.naming_template || '{relative_dir}/{basename}_{stem}.{ext}';
         node.data.conflict = config.conflict || node.data.conflict || 'rename';
         node.data.format = config.format || node.data.format || 'wav';
+        node.data.mode = config.mode || node.data.mode || 'standard';
       }
       delete node.data.config;
       return node;
@@ -1562,12 +1683,16 @@
       if (node.type === 'slicer' || node.type === 'peak_normalize') { node.data.inputs = node.data.inputs || [{id:'audio',label:'audio'}]; node.data.outputs = node.data.outputs || [{id:'audio',label:'audio'}]; }
       if (node.type === 'output_folder') node.data.inputs = node.data.inputs || [{id:'audio',label:'audio'}];
       node.data.config=node.data.config||{};
-      if (node.type === 'input_file') node.data.config.path = String(node.data.config.path ?? node.data.path ?? '').trim();
+      if (node.type === 'input_file') {
+        node.data.config.path = String(node.data.config.path ?? node.data.path ?? '').trim();
+        node.data.config.upload_id = String(node.data.config.upload_id ?? node.data.upload_id ?? '').trim();
+        node.data.config.upload_name = String(node.data.config.upload_name ?? node.data.upload_name ?? '').trim();
+      }
       if (node.type === 'input_folder') { node.data.config.path = String(node.data.config.path ?? node.data.path ?? '').trim(); node.data.config.recursive ??= node.data.recursive ?? true; node.data.config.include ??= (node.data.extensions || []).map(ext=>`*${ext}`).join(';'); }
       if (node.type === 'separator') node.data.config = {...(node.data.options || {}),...node.data.config};
       if (node.type === 'slicer') node.data.config = {threshold:node.data.threshold ?? -40,min_length:node.data.min_length ?? 5000,min_interval:node.data.min_interval ?? 300,hop_size:node.data.hop_size ?? 10,max_sil_kept:node.data.max_sil_kept ?? 1000,output_format:node.data.output_format || 'wav',...node.data.config};
       if (node.type === 'peak_normalize') node.data.config = {target_peak_db:node.data.target_peak_db ?? -3,...node.data.config};
-      if (node.type === 'output_folder') { node.data.config = {path:node.data.path || '',naming:node.data.naming_template || '{basename}_{stem}.{ext}',format:node.data.format || 'wav',conflict:node.data.conflict || 'rename',...node.data.config}; node.data.config.path = String(node.data.config.path ?? '').trim(); }
+      if (node.type === 'output_folder') { node.data.config = {path:node.data.path || '',naming:node.data.naming_template || '{basename}_{stem}.{ext}',format:node.data.format || 'wav',conflict:node.data.conflict || 'rename',mode:node.data.mode || 'standard',...node.data.config}; node.data.config.path = String(node.data.config.path ?? '').trim(); }
     });
     payload.edges.forEach(edge => { edge.id ||= uid('edge'); });
     let id = payload.id || uid('workflow');
@@ -1673,6 +1798,7 @@
     if (/Input folder node .* is missing path/i.test(text)) return t('validation.inputFolderMissingPath');
     if (/Output node .* is missing path/i.test(text)) return t('validation.outputMissingPath');
     if (/Input audio file does not exist/i.test(text)) return t('validation.inputFileNotFound');
+    if (/Uploaded audio file does not exist|invalid audio upload reference/i.test(text)) return t('validation.uploadMissing');
     if (/Input audio path is not a file/i.test(text)) return t('validation.inputPathNotFile');
     if (/Unsupported input audio extension/i.test(text)) return t('validation.inputExtensionUnsupported');
     if (/Input folder does not exist/i.test(text)) return t('validation.inputFolderNotFound');
@@ -1684,6 +1810,9 @@
     if (/Slicer node .* (?:has invalid|requires|threshold|uses an unsupported)/i.test(text)) return t('validation.slicerSettingsInvalid');
     if (/Peak normalize node .* (?:has an invalid|target peak)/i.test(text)) return t('validation.peakNormalizeTargetInvalid');
     if (/Output node .* has no audio input/i.test(text)) return t('validation.outputMissingInput');
+    if (/input port .* accepts only one connection/i.test(text)) return t('validation.singleInputConnection');
+    if (/Smart classification output node .* requires separator-derived audio/i.test(text)) return t('validation.smartRequiresSeparator');
+    if (/Output node .* uses an unsupported mode/i.test(text)) return t('validation.outputModeInvalid');
     if (/Workflow needs at least one input node/i.test(text)) return t('validation.workflowMissingInput');
     if (/Workflow needs at least one output node/i.test(text)) return t('validation.workflowMissingOutput');
     if (/unknown model/i.test(text)) return t('validation.unknownModel');
@@ -2040,7 +2169,7 @@
   }
 
   function startCanvasPan(event) {
-    if (event.button !== 0 || event.target.closest('.node,.edge-hit,button,input,select,textarea,a')) return;
+    if (event.button !== 0 || event.target.closest('.node,.edge-hit,#nodeToolbar,button,input,select,textarea,a')) return;
     cancelPointerInteractions(true);
     cancelConnection();
     event.preventDefault();
@@ -2066,7 +2195,7 @@
       node.data.width = clampNodeDimension(resize.startWidth + dx, 'width');
       node.data.height = clampNodeDimension(resize.startHeight + dy, 'height');
       applyNodeDimensions(node, element);
-      renderEdges(); drawMinimap();
+      renderEdges(); drawMinimap(); positionNodeToolbar();
       return;
     }
     if (state.panning?.pointerId === event.pointerId) {
@@ -2111,6 +2240,7 @@
       }
       element?.classList.remove('resizing');
       refs.viewport.classList.remove('node-resizing');
+      positionNodeToolbar();
       return;
     }
     if (state.dragging?.pointerId === event.pointerId) {
@@ -2133,7 +2263,14 @@
 
   function bindGlobalEvents() {
     refs.viewport.addEventListener('pointerdown', startCanvasPan);
-    document.addEventListener('pointerdown', event => { if (!event.target.closest('.node-menu,.node-delete-popover')) closeNodeDeleteConfirmations(); });
+    document.addEventListener('pointerdown', event => { if (!event.target.closest('#nodeToolbar')) closeNodeDeleteConfirmation(); });
+    $('#duplicateNodeAction').addEventListener('click', duplicateSelectedNode);
+    $('#deleteNodeAction').addEventListener('click', openNodeDeleteConfirmation);
+    $('#cancelNodeDelete').addEventListener('click', () => closeNodeDeleteConfirmation(true));
+    $('#confirmNodeDelete').addEventListener('click', () => {
+      const nodeId = state.selectedNode;
+      if (nodeId) removeNode(nodeId);
+    });
     document.addEventListener('pointermove', handlePointerMove, { passive:false });
     document.addEventListener('pointerup', event => finishPointerInteraction(event, false));
     document.addEventListener('pointercancel', event => finishPointerInteraction(event, true));
@@ -2148,7 +2285,7 @@
     document.addEventListener('keydown',event=>{
       const manager = $('.manager-overlay:not(.hidden)');
       if (event.key === 'Escape' && manager) { event.preventDefault(); manager.classList.add('hidden'); return; }
-      if (event.key === 'Escape' && closeNodeDeleteConfirmations(true)) { event.preventDefault(); return; }
+      if (event.key === 'Escape' && closeNodeDeleteConfirmation(true)) { event.preventDefault(); return; }
       if ((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s') { event.preventDefault(); saveWorkflow(); return; }
       if(event.key==='Escape'&&(state.connectionDrag||state.pendingPort)){event.preventDefault();cancelConnection();return;}
       if (manager || ['INPUT','SELECT','TEXTAREA'].includes(event.target.tagName)) return;

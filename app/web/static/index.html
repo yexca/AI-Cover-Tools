@@ -89,6 +89,17 @@
           <svg class="connections" id="connectionsSvg" viewBox="0 0 5000 3500" aria-hidden="true"></svg>
           <div id="nodesLayer"></div>
         </div>
+        <div class="node-toolbar hidden" id="nodeToolbar" role="toolbar" aria-label="Node actions" data-i18n-aria-label="node.toolbar.label">
+          <button type="button" id="duplicateNodeAction" title="Duplicate node" data-i18n-title="node.action.duplicate" aria-label="Duplicate node" data-i18n-aria-label="node.action.duplicate">⧉</button>
+          <button type="button" class="danger" id="deleteNodeAction" title="Delete node" data-i18n-title="node.action.delete" aria-label="Delete node" data-i18n-aria-label="node.action.delete" aria-expanded="false" aria-controls="nodeDeleteConfirmation">⌫</button>
+          <div class="node-toolbar-confirmation hidden" id="nodeDeleteConfirmation" role="dialog" aria-label="Delete this node?" data-i18n-aria-label="node.delete.question">
+            <span data-i18n="node.delete.question">Delete this node?</span>
+            <div>
+              <button type="button" id="cancelNodeDelete" data-i18n="node.delete.cancel">Cancel</button>
+              <button type="button" class="confirm" id="confirmNodeDelete" data-i18n="node.delete.confirm">Delete</button>
+            </div>
+          </div>
+        </div>
         <div class="connection-hint hidden" id="connectionHint" data-i18n="canvas.connectionHint">Choose an input port to complete the connection · Esc to cancel</div>
         <div class="empty-canvas hidden" id="emptyCanvas">
           <div class="empty-icon">⌁</div><b data-i18n="canvas.empty.title">Add the first node from the left</b><span data-i18n="canvas.empty.description">Drag a node onto the canvas, or double-click to add it</span>
